@@ -425,9 +425,10 @@ def mark_video_failed(table, video_id: str, error: str) -> None:
                 "pk": f"VIDEO#{video_id}",
                 "sk": "METADATA"
             },
-            UpdateExpression="SET #status = :status, error = :error, failed_at = :failed_at",
+            UpdateExpression="SET #status = :status, #error = :error, failed_at = :failed_at",
             ExpressionAttributeNames={
-                "#status": "status"
+                "#status": "status",
+                "#error": "error"  # 'error' is a reserved keyword in DynamoDB
             },
             ExpressionAttributeValues={
                 ":status": "FAILED",
