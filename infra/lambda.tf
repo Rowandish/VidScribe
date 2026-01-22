@@ -7,30 +7,22 @@
 # -----------------------------------------------------------------------------
 # Lambda Layer for Dependencies
 # Contains youtube-transcript-api and other shared dependencies
+# NOTE: Run scripts/build_layers.ps1 (Windows) or scripts/build_layers.sh (Linux)
+#       BEFORE running terraform apply
 # -----------------------------------------------------------------------------
 
-resource "null_resource" "build_layer" {
-  triggers = {
-    requirements = filemd5("${path.module}/../src/processor/requirements.txt")
-    use_windows  = var.use_windows_scripts
-  }
-
-  # Use PowerShell on Windows, Bash on Linux/Mac/CI
-  provisioner "local-exec" {
-    command     = var.use_windows_scripts ? "powershell.exe -ExecutionPolicy Bypass -File ${path.module}/../scripts/build_layers.ps1" : "bash ${path.module}/../scripts/build_layers.sh"
-    working_dir = path.module
-  }
-}
-
 resource "aws_lambda_layer_version" "dependencies" {
-  depends_on = [null_resource.build_layer]
-
   filename            = "${path.module}/../packages/dependencies-layer.zip"
   layer_name          = "${local.name_prefix}-dependencies"
   compatible_runtimes = [var.lambda_runtime]
   description         = "Shared dependencies including youtube-transcript-api"
 
   source_code_hash = filebase64sha256("${path.module}/../packages/dependencies-layer.zip")
+
+  lifecycle {
+    # Ignore changes to source_code_hash to prevent unnecessary updates
+    ignore_changes = []
+  }
 }
 
 # -----------------------------------------------------------------------------
