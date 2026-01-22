@@ -1,0 +1,63 @@
+# =============================================================================
+# VidScribe - Example Terraform Variables
+# =============================================================================
+# Copy this file to terraform.tfvars and fill in your values.
+# Do NOT commit terraform.tfvars to version control!
+# =============================================================================
+
+# AWS Region
+aws_region = "eu-west-1"
+
+# Project naming
+project_name = "vidscribe"
+environment  = "prod"
+
+# -----------------------------------------------------------------------------
+# Windows Users: Uncomment the line below to use PowerShell scripts
+# Linux/Mac/CI users should leave this as false (default)
+# -----------------------------------------------------------------------------
+# use_windows_scripts = true
+
+# -----------------------------------------------------------------------------
+# Email Configuration (REQUIRED)
+# Both emails must be verified in SES before sending
+# -----------------------------------------------------------------------------
+sender_email      = "your-verified-sender@example.com"
+destination_email = "your-email@example.com"
+admin_email       = "admin@example.com"  # For error notifications
+
+# -----------------------------------------------------------------------------
+# YouTube Configuration
+# Add the channel IDs you want to monitor (not the channel names!)
+# You can find the channel ID in the URL: youtube.com/channel/CHANNEL_ID
+# -----------------------------------------------------------------------------
+youtube_channels = "[\"UCBcRF18a7Qf58cCRy5xuWwQ\"]"
+
+# -----------------------------------------------------------------------------
+# LLM Configuration
+# Supported providers: "gemini" or "groq"
+# -----------------------------------------------------------------------------
+llm_provider = "gemini"
+llm_model    = "gemini-1.5-flash"
+
+# For Groq, use:
+# llm_provider = "groq"
+# llm_model    = "llama-3.1-70b-versatile"
+
+# -----------------------------------------------------------------------------
+# API Keys (Sensitive - prefer GitHub Secrets or environment variables)
+# These can also be set via:
+#   TF_VAR_youtube_api_key=xxx
+#   TF_VAR_llm_api_key=xxx
+# -----------------------------------------------------------------------------
+# youtube_api_key = "your-youtube-data-api-v3-key"
+# llm_api_key     = "your-gemini-or-groq-api-key"
+
+# -----------------------------------------------------------------------------
+# Optional: Customize Lambda settings
+# -----------------------------------------------------------------------------
+# poller_timeout     = 60
+# processor_timeout  = 120
+# newsletter_timeout = 60
+# log_retention_days = 7
+# dynamodb_ttl_days  = 30

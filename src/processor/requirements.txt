@@ -1,0 +1,3 @@
+# Processor Lambda dependencies
+# These are packaged as a Lambda Layer
+youtube-transcript-api>=0.6.0

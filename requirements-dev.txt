@@ -1,0 +1,22 @@
+# Development dependencies for VidScribe
+# Install with: pip install -r requirements-dev.txt
+
+# Testing
+pytest>=7.0.0
+pytest-cov>=4.0.0
+moto[dynamodb,sqs,ssm,ses]>=4.0.0
+
+# Code quality
+black>=23.0.0
+isort>=5.0.0
+flake8>=6.0.0
+mypy>=1.0.0
+
+# Type stubs
+boto3-stubs[dynamodb,sqs,ssm,ses,lambda]>=1.0.0
+
+# YouTube transcript API for local testing
+youtube-transcript-api>=0.6.0
+
+# Local Lambda testing
+python-lambda-local>=0.1.0

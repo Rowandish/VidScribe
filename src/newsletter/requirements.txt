@@ -1,0 +1,2 @@
+# Newsletter Lambda has no external dependencies
+# It uses only boto3 (included in Lambda runtime)
