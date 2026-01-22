@@ -14,7 +14,7 @@ resource "aws_ssm_parameter" "youtube_channels" {
   name        = "${local.ssm_prefix}/youtube_channels"
   description = "JSON list of YouTube channel IDs to monitor. Example: [\"UCBcRF18a7Qf58cCRy5xuWwQ\"]"
   type        = "String"
-  value       = var.youtube_channels
+  value       = jsonencode(var.youtube_channels)
   tier        = "Standard"
 
   tags = {

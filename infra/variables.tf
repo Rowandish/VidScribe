@@ -135,9 +135,9 @@ variable "log_retention_days" {
 # -----------------------------------------------------------------------------
 
 variable "youtube_channels" {
-  description = "JSON list of YouTube channel IDs to monitor"
-  type        = string
-  default     = "[\"UCBcRF18a7Qf58cCRy5xuWwQ\"]" # Example: MKBHD channel
+  description = "List of YouTube channel IDs to monitor"
+  type        = list(string)
+  default     = ["UCBcRF18a7Qf58cCRy5xuWwQ"] # Example: MKBHD channel
 }
 
 variable "destination_email" {

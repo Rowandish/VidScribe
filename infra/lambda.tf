@@ -87,6 +87,10 @@ resource "aws_lambda_function" "poller" {
     Name     = "Poller Lambda"
     Function = "poller"
   }
+
+  lifecycle {
+    ignore_changes = [source_code_hash]
+  }
 }
 
 # -----------------------------------------------------------------------------
@@ -126,6 +130,10 @@ resource "aws_lambda_function" "processor" {
   tags = {
     Name     = "Processor Lambda"
     Function = "processor"
+  }
+
+  lifecycle {
+    ignore_changes = [source_code_hash]
   }
 }
 
@@ -173,5 +181,9 @@ resource "aws_lambda_function" "newsletter" {
   tags = {
     Name     = "Newsletter Lambda"
     Function = "newsletter"
+  }
+
+  lifecycle {
+    ignore_changes = [source_code_hash]
   }
 }
