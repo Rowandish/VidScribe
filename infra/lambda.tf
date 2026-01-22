@@ -11,15 +11,14 @@
 
 resource "null_resource" "build_layer" {
   triggers = {
-    requirements   = filemd5("${path.module}/../src/processor/requirements.txt")
-    use_windows    = var.use_windows_scripts
+    requirements = filemd5("${path.module}/../src/processor/requirements.txt")
+    use_windows  = var.use_windows_scripts
   }
 
   # Use PowerShell on Windows, Bash on Linux/Mac/CI
   provisioner "local-exec" {
-    command     = var.use_windows_scripts ? "powershell -ExecutionPolicy Bypass -File ${path.module}/../scripts/build_layers.ps1" : "bash ${path.module}/../scripts/build_layers.sh"
+    command     = var.use_windows_scripts ? "powershell.exe -ExecutionPolicy Bypass -File ${path.module}/../scripts/build_layers.ps1" : "bash ${path.module}/../scripts/build_layers.sh"
     working_dir = path.module
-    interpreter = var.use_windows_scripts ? ["powershell", "-Command"] : null
   }
 }
 

@@ -180,15 +180,13 @@ variable "llm_model" {
 # -----------------------------------------------------------------------------
 
 variable "youtube_api_key" {
-  description = "YouTube Data API v3 key"
+  description = "YouTube Data API v3 key (stored in SSM as SecureString)"
   type        = string
-  sensitive   = true
   default     = ""
 }
 
 variable "llm_api_key" {
-  description = "API key for the LLM provider (Gemini or Groq)"
+  description = "API key for the LLM provider - Gemini or Groq (stored in SSM as SecureString)"
   type        = string
-  sensitive   = true
   default     = ""
 }
