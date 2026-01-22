@@ -31,22 +31,22 @@ resource "aws_lambda_layer_version" "dependencies" {
 
 data "archive_file" "poller" {
   type        = "zip"
-  source_dir  = "${path.module}/../src/poller"
-  output_path = "${path.module}/../packages/poller.zip"
+  source_dir  = "${path.root}/../src/poller"
+  output_path = "${path.root}/../packages/poller.zip"
   excludes    = ["__pycache__", "*.pyc", "requirements.txt"]
 }
 
 data "archive_file" "processor" {
   type        = "zip"
-  source_dir  = "${path.module}/../src/processor"
-  output_path = "${path.module}/../packages/processor.zip"
+  source_dir  = "${path.root}/../src/processor"
+  output_path = "${path.root}/../packages/processor.zip"
   excludes    = ["__pycache__", "*.pyc", "requirements.txt"]
 }
 
 data "archive_file" "newsletter" {
   type        = "zip"
-  source_dir  = "${path.module}/../src/newsletter"
-  output_path = "${path.module}/../packages/newsletter.zip"
+  source_dir  = "${path.root}/../src/newsletter"
+  output_path = "${path.root}/../packages/newsletter.zip"
   excludes    = ["__pycache__", "*.pyc", "requirements.txt"]
 }
 
