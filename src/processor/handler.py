@@ -29,7 +29,9 @@ try:
     from youtube_transcript_api._errors import (
         NoTranscriptFound,
         TranscriptsDisabled,
-        VideoUnavailable
+        VideoUnavailable,
+        IpBlocked,
+        RequestBlocked,
     )
 except ImportError:
     # Fallback for local testing
@@ -81,6 +83,9 @@ Transcript:
 
 Please provide a well-structured summary in {language}:"""
 
+class TranscriptBlockedError(Exception):
+    """Raised when YouTube blocks transcript requests from the current IP/network."""
+
 # -----------------------------------------------------------------------------
 # Helper Functions
 # -----------------------------------------------------------------------------
@@ -112,6 +117,79 @@ def calculate_ttl() -> int:
 
 
 def get_transcript(video_id: str) -> Optional[str]:
+    """
+    Download the transcript for a YouTube video using youtube-transcript-api (new API).
+
+    Attempts to get transcripts in order of preference:
+    1. Manually created English transcript
+    2. Auto-generated English transcript
+    3. Any available transcript (auto-translated to English)
+
+    Returns:
+        The transcript text, or None if unavailable.
+        Raises TranscriptBlockedError if YouTube blocks requests from this IP/network.
+    """
+    if YouTubeTranscriptApi is None:
+        logger.error("youtube-transcript-api not available")
+        return None
+
+    try:
+        ytt_api = YouTubeTranscriptApi()
+
+        # New API: list available transcripts
+        transcript_list = ytt_api.list(video_id)
+
+        transcript = None
+
+        try:
+            transcript = transcript_list.find_manually_created_transcript(["en", "en-US", "en-GB"])
+        except NoTranscriptFound:
+            try:
+                transcript = transcript_list.find_generated_transcript(["en", "en-US", "en-GB"])
+            except NoTranscriptFound:
+                # Try any transcript and translate to English
+                try:
+                    for t in transcript_list:
+                        transcript = t.translate("en")
+                        break
+                except Exception as e:
+                    logger.warning(f"Could not translate transcript: {e}")
+
+        if transcript is None:
+            logger.warning(f"No usable transcript found for video {video_id}")
+            return None
+
+        # New API: fetch() returns snippet objects with a .text attribute
+        transcript_snippets = transcript.fetch()
+        full_text = " ".join([s.text for s in transcript_snippets])
+
+        # Truncate for LLM context limits
+        max_chars = 30000
+        if len(full_text) > max_chars:
+            logger.info(f"Truncating transcript from {len(full_text)} to {max_chars} chars")
+            full_text = full_text[:max_chars] + "... [transcript truncated]"
+
+        logger.info(f"Successfully retrieved transcript for video {video_id} ({len(full_text)} chars)")
+        return full_text
+
+    except (IpBlocked, RequestBlocked) as e:
+        # This is the important part for AWS Lambda: cloud IPs often get blocked
+        msg = f"YouTube blocked transcript requests from this environment: {e}"
+        logger.warning(msg)
+        raise TranscriptBlockedError(msg) from e
+
+    except TranscriptsDisabled:
+        logger.warning(f"Transcripts are disabled for video {video_id}")
+        return None
+
+    except VideoUnavailable:
+        logger.warning(f"Video {video_id} is unavailable")
+        return None
+
+    except Exception as e:
+        logger.error(f"Error getting transcript for video {video_id}: {e}")
+        return None
+
     """
     Download the transcript for a YouTube video using youtube-transcript-api (new API).
 
@@ -418,14 +496,16 @@ def save_summary(table, video: dict, summary: str) -> bool:
         return False
 
 
-def mark_video_failed(table, video_id: str, error: str) -> None:
+def mark_video_failed(table, video_id: str, error: str, failure_reason: str = "FAILED") -> None:
     """
     Mark a video as failed in DynamoDB.
-    
-    Args:
-        table: DynamoDB table resource
-        video_id: The video ID
-        error: Error message describing the failure
+
+    failure_reason examples:
+      - YOUTUBE_BLOCKED
+      - NO_TRANSCRIPT
+      - TRANSCRIPTS_DISABLED
+      - VIDEO_UNAVAILABLE
+      - UNKNOWN
     """
     try:
         table.update_item(
@@ -433,14 +513,15 @@ def mark_video_failed(table, video_id: str, error: str) -> None:
                 "pk": f"VIDEO#{video_id}",
                 "sk": "METADATA"
             },
-            UpdateExpression="SET #status = :status, #error = :error, failed_at = :failed_at",
+            UpdateExpression="SET #status = :status, #error = :error, failure_reason = :reason, failed_at = :failed_at",
             ExpressionAttributeNames={
                 "#status": "status",
                 "#error": "error"  # 'error' is a reserved keyword in DynamoDB
             },
             ExpressionAttributeValues={
                 ":status": "FAILED",
-                ":error": error[:500],  # Truncate error message
+                ":error": error[:500],
+                ":reason": failure_reason[:100],
                 ":failed_at": datetime.now(timezone.utc).isoformat()
             }
         )
@@ -504,14 +585,20 @@ def lambda_handler(event: dict, context: Any) -> dict:
             logger.info(f"Processing video: {video['title']} ({video_id})")
             
             # Step 1: Download the transcript
-            transcript = get_transcript(video_id)
-            
+            try:
+                transcript = get_transcript(video_id)
+            except TranscriptBlockedError as e:
+                # Cloud IP blocked: don't retry forever; classify explicitly
+                logger.warning(f"Transcript blocked for video {video_id}: {e}")
+                mark_video_failed(table, video_id, str(e), failure_reason="YOUTUBE_BLOCKED")
+                continue
+
             if transcript is None:
                 error_msg = "Failed to retrieve transcript"
                 logger.warning(f"{error_msg} for video {video_id}")
-                mark_video_failed(table, video_id, error_msg)
-                # Don't retry - transcript likely not available
+                mark_video_failed(table, video_id, error_msg, failure_reason="NO_TRANSCRIPT")
                 continue
+
             
             # Step 2: Generate summary with LLM
             summary = generate_summary(
