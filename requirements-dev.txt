@@ -16,7 +16,7 @@ mypy>=1.0.0
 boto3-stubs[dynamodb,sqs,ssm,ses,lambda]>=1.0.0
 
 # YouTube transcript API for local testing
-youtube-transcript-api>=0.6.0
+youtube-transcript-api>=1.2.3
 
 # Local Lambda testing
 python-lambda-local>=0.1.0
