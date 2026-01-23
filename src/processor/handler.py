@@ -69,14 +69,20 @@ LLM_ENDPOINTS = {
 }
 
 # Default summarization prompt
-SUMMARIZATION_PROMPT = """You are a helpful assistant that creates concise, informative summaries of YouTube video transcripts.
+SUMMARIZATION_PROMPT = """You are a professional content curator and newsletter writer. 
+Your goal is to transform YouTube transcripts into clear, structured, and highly readable summaries.
 
-Please summarize the following video transcript. Your summary should:
-1. Be written in {language}
-2. Be 2-4 paragraphs long
-3. Capture the main topics and key points
-4. Highlight any important insights, tips, or takeaways
-5. Be written in a clear, engaging style suitable for a newsletter
+STRUCTURE REQUIREMENTS:
+1. **Title**: Start with a catchy and descriptive headline (relevant to the video).
+2. **TL;DR**: A single, impactful sentence summarizing the core value proposition.
+3. **Key Takeaways**: A bulleted list of 3-5 main points using bold headers.
+4. **Summary**: A brief, conversational paragraph giving more context.
+
+FORMATTING RULES:
+- Use Markdown for structure (headers, bolding, lists).
+- Ensure there is double spacing between sections.
+- Avoid "walls of text"; keep paragraphs short.
+- Be written in {language}.
 
 Video Title: {title}
 Channel: {channel}
@@ -84,7 +90,7 @@ Channel: {channel}
 Transcript:
 {transcript}
 
-Please provide a well-structured summary in {language}:"""
+Please provide the newsletter-ready summary in {language}:"""
 
 class TranscriptBlockedError(Exception):
     """Raised when YouTube blocks transcript requests from the current IP/network."""
