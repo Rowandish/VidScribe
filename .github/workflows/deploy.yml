@@ -156,11 +156,13 @@ jobs:
           TF_VAR_admin_email: ${{ vars.ADMIN_EMAIL || '' }}
           TF_VAR_summarization_language: ${{ vars.SUMMARIZATION_LANGUAGE || 'English' }}
       
-      - name: Upload Terraform Plan
+      - name: Upload Deployment Bundle
         uses: actions/upload-artifact@v4
         with:
-          name: terraform-plan
-          path: infra/tfplan
+          name: deployment-bundle
+          path: |
+            infra/tfplan
+            packages/*.zip
           retention-days: 1
 
   # ---------------------------------------------------------------------------
@@ -180,17 +182,10 @@ jobs:
       - name: Create packages directory
         run: mkdir -p packages
       
-      - name: Download Lambda Layer
+      - name: Download Deployment Bundle
         uses: actions/download-artifact@v4
         with:
-          name: lambda-layers
-          path: packages/
-      
-      - name: Download Terraform Plan
-        uses: actions/download-artifact@v4
-        with:
-          name: terraform-plan
-          path: infra/
+          name: deployment-bundle
       
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
