@@ -213,7 +213,7 @@ def get_transcript(
                 )
             else:
                 ytt_api = YouTubeTranscriptApi()
-                logger.error(f"Using default proxy for video, it wil probably fail {video_id}. Username: {proxy_username}. Password: {proxy_password[:3]}***...")
+                logger.warning(f"Using default proxy for video, it wil probably fail {video_id}. Username: {proxy_username}. Password:***...")
 
             transcript_list = ytt_api.list(video_id)
 
