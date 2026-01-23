@@ -124,39 +124,3 @@ resource "aws_ssm_parameter" "llm_api_key" {
     ignore_changes = [value]
   }
 }
-
-# -----------------------------------------------------------------------------
-# Webshare Proxy Configuration
-# -----------------------------------------------------------------------------
-
-resource "aws_ssm_parameter" "webshare_username" {
-  name        = "${local.ssm_prefix}/webshare_username"
-  description = "Webshare proxy username"
-  type        = "String"
-  value       = var.webshare_username != "" ? var.webshare_username : "PLACEHOLDER_REPLACE_ME"
-  tier        = "Standard"
-
-  tags = {
-    Name = "Webshare Username"
-  }
-
-  lifecycle {
-    ignore_changes = [value]
-  }
-}
-
-resource "aws_ssm_parameter" "webshare_password" {
-  name        = "${local.ssm_prefix}/webshare_password"
-  description = "Webshare proxy password"
-  type        = "SecureString"
-  value       = var.webshare_password != "" ? var.webshare_password : "PLACEHOLDER_REPLACE_ME"
-  tier        = "Standard"
-
-  tags = {
-    Name = "Webshare Password"
-  }
-
-  lifecycle {
-    ignore_changes = [value]
-  }
-}

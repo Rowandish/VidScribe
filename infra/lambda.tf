@@ -115,8 +115,8 @@ resource "aws_lambda_function" "processor" {
       DYNAMODB_TABLE_NAME     = aws_dynamodb_table.videos.name
       SSM_LLM_CONFIG          = aws_ssm_parameter.llm_config.name
       SSM_LLM_API_KEY         = aws_ssm_parameter.llm_api_key.name
-      SSM_WEBSHARE_USERNAME   = aws_ssm_parameter.webshare_username.name
-      SSM_WEBSHARE_PASSWORD   = aws_ssm_parameter.webshare_password.name
+      WEBSHARE_USERNAME       = var.webshare_username
+      WEBSHARE_PASSWORD       = var.webshare_password
       TTL_DAYS                = var.dynamodb_ttl_days
       POWERTOOLS_SERVICE_NAME = "vidscribe-processor"
       LOG_LEVEL               = "INFO"

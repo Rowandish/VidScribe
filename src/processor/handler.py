@@ -49,8 +49,8 @@ except ImportError:
 DYNAMODB_TABLE_NAME = os.environ.get("DYNAMODB_TABLE_NAME", "vidscribe-videos")
 SSM_LLM_CONFIG = os.environ.get("SSM_LLM_CONFIG", "/vidscribe/llm_config")
 SSM_LLM_API_KEY = os.environ.get("SSM_LLM_API_KEY", "/vidscribe/llm_api_key")
-SSM_WEBSHARE_USERNAME = os.environ.get("SSM_WEBSHARE_USERNAME", "/vidscribe/webshare_username")
-SSM_WEBSHARE_PASSWORD = os.environ.get("SSM_WEBSHARE_PASSWORD", "/vidscribe/webshare_password")
+WEBSHARE_USERNAME = os.environ.get("WEBSHARE_USERNAME")
+WEBSHARE_PASSWORD = os.environ.get("WEBSHARE_PASSWORD")
 TTL_DAYS = int(os.environ.get("TTL_DAYS", "30"))
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
 
@@ -578,15 +578,13 @@ def lambda_handler(event: dict, context: Any) -> dict:
         llm_config = json.loads(llm_config_json)
         llm_api_key = get_ssm_parameter(SSM_LLM_API_KEY, with_decryption=True)
         
-        # Load Webshare credentials (optional)
-        webshare_username = None
-        webshare_password = None
-        try:
-            webshare_username = get_ssm_parameter(SSM_WEBSHARE_USERNAME)
-            webshare_password = get_ssm_parameter(SSM_WEBSHARE_PASSWORD, with_decryption=True)
-            logger.info("Webshare credentials loaded successfully")
-        except Exception:
-            logger.info("Webshare credentials not found or incomplete, proceeding without proxy")
+        # Load Webshare credentials from Lambda environment (optional)
+        webshare_username = WEBSHARE_USERNAME
+        webshare_password = WEBSHARE_PASSWORD
+        if webshare_username and webshare_password:
+            logger.info("Webshare credentials loaded from environment")
+        else:
+            logger.info("Webshare credentials not set, proceeding without proxy")
 
     except Exception as e:
         logger.error(f"Failed to load LLM configuration: {e}")

@@ -243,6 +243,8 @@ $env:TF_VAR_webshare_username="YOUR_WEBSHARE_USERNAME"
 $env:TF_VAR_webshare_password="YOUR_WEBSHARE_PASSWORD"
 ```
 
+> **Note:** Webshare credentials are **never** stored in SSM. Provide them locally via the `TF_VAR_webshare_*` exports above and configure GitHub secrets named `WEBSHARE_USERNAME` and `WEBSHARE_PASSWORD` so Terraform can inject the values into Lambda without persisting them elsewhere.
+
 ### Step 5: Deploy
 
 ```bash
@@ -311,8 +313,8 @@ For automated deployments, configure the following secrets in your GitHub reposi
 | `TF_LOCK_TABLE` | DynamoDB table name (usually `vidscribe-terraform-lock`) |
 | `TF_VAR_YOUTUBE_API_KEY` | YouTube Data API key |
 | `TF_VAR_LLM_API_KEY` | Gemini or Groq API key |
-| `TF_VAR_webshare_username` | Webshare proxy username |
-| `TF_VAR_webshare_password` | Webshare proxy password |
+| `WEBSHARE_USERNAME` | Webshare proxy username (optional; GitHub Actions maps this to `TF_VAR_webshare_username`) |
+| `WEBSHARE_PASSWORD` | Webshare proxy password (optional; GitHub Actions maps this to `TF_VAR_webshare_password`) |
 
 Optional repository variables:
 

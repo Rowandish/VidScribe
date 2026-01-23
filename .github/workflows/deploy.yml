@@ -16,6 +16,8 @@
 # Optional Secrets (for initial deployment):
 #   - TF_VAR_YOUTUBE_API_KEY: YouTube Data API key
 #   - TF_VAR_LLM_API_KEY: Gemini or Groq API key
+#   - WEBSHARE_USERNAME: Webshare proxy username (mapped to TF_VAR_webshare_username)
+#   - WEBSHARE_PASSWORD: Webshare proxy password (mapped to TF_VAR_webshare_password)
 # =============================================================================
 
 name: Deploy VidScribe
@@ -155,6 +157,8 @@ jobs:
           TF_VAR_destination_email: ${{ vars.DESTINATION_EMAIL || '' }}
           TF_VAR_admin_email: ${{ vars.ADMIN_EMAIL || '' }}
           TF_VAR_summarization_language: ${{ vars.SUMMARIZATION_LANGUAGE || 'English' }}
+          TF_VAR_webshare_username: ${{ secrets.WEBSHARE_USERNAME }}
+          TF_VAR_webshare_password: ${{ secrets.WEBSHARE_PASSWORD }}
       
       - name: Upload Deployment Bundle
         uses: actions/upload-artifact@v4

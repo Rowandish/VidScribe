@@ -198,13 +198,13 @@ variable "llm_api_key" {
 }
 
 variable "webshare_username" {
-  description = "Webshare proxy username (stored in SSM)"
+  description = "Webshare proxy username (passed directly into Lambda via environment variable)."
   type        = string
   default     = ""
 }
 
 variable "webshare_password" {
-  description = "Webshare proxy password (stored in SSM as SecureString)"
+  description = "Webshare proxy password (passed directly into Lambda via environment variable)."
   type        = string
   default     = ""
 }
