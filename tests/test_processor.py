@@ -95,7 +95,7 @@ class TestProcessorLambda:
             title="Test Video",
             channel="Test Channel",
             api_key="test-api-key",
-            model="gemini-1.5-flash",
+            model="gemini-flash-latest",
             language="English"
         )
         
@@ -222,7 +222,7 @@ class TestProcessorLambda:
                 transcript="Test transcript",
                 title="Test Title",
                 channel="Test Channel",
-                llm_config={"provider": "gemini", "model": "gemini-1.5-flash"},
+                llm_config={"provider": "gemini", "model": "gemini-flash-latest"},
                 api_key="test-key"
             )
             

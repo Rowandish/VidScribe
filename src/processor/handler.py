@@ -284,7 +284,7 @@ def summarize_with_gemini(transcript: str, title: str, channel: str,
         title: Video title
         channel: Channel name
         api_key: Gemini API key
-        model: Model name (e.g., "gemini-1.5-flash")
+        model: Model name (e.g., "gemini-flash-latest")
         language: The language for the summary
     
     Returns:
@@ -431,7 +431,7 @@ def generate_summary(transcript: str, title: str, channel: str,
         The generated summary, or None on error
     """
     provider = llm_config.get("provider", "gemini").lower()
-    model = llm_config.get("model", "gemini-1.5-flash")
+    model = llm_config.get("model", "gemini-flash-latest")
     language = llm_config.get("language", "English")
     
     logger.info(f"Generating summary using {provider} ({model}) in {language}")

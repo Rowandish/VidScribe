@@ -172,7 +172,7 @@ variable "llm_provider" {
 variable "llm_model" {
   description = "Model name for the LLM provider"
   type        = string
-  default     = "gemini-1.5-flash"
+  default     = "gemini-flash-latest"
 }
 
 variable "summarization_language" {

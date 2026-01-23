@@ -133,7 +133,7 @@ def ssm_parameters():
         
         ssm.put_parameter(
             Name="/vidscribe/llm_config",
-            Value='{"provider": "gemini", "model": "gemini-1.5-flash"}',
+            Value='{"provider": "gemini", "model": "gemini-flash-latest"}',
             Type="String"
         )
         

@@ -218,7 +218,7 @@ youtube_channels = "[\"CHANNEL_ID_1\", \"CHANNEL_ID_2\"]"
 
 # LLM Configuration (choose one)
 llm_provider = "gemini"  # or "groq"
-llm_model    = "gemini-1.5-flash"  # or "llama-3.1-70b-versatile"
+llm_model    = "gemini-flash-latest"  # or "llama-3.1-70b-versatile"
 summarization_language = "Italian"
 ```
 

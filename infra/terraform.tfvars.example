@@ -38,7 +38,7 @@ youtube_channels = "[\"UCBcRF18a7Qf58cCRy5xuWwQ\"]"
 # Supported providers: "gemini" or "groq"
 # -----------------------------------------------------------------------------
 llm_provider = "gemini"
-llm_model    = "gemini-1.5-flash"
+llm_model    = "gemini-flash-latest"
 
 # For Groq, use:
 # llm_provider = "groq"
