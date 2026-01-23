@@ -67,10 +67,11 @@ LLM_ENDPOINTS = {
 SUMMARIZATION_PROMPT = """You are a helpful assistant that creates concise, informative summaries of YouTube video transcripts.
 
 Please summarize the following video transcript. Your summary should:
-1. Be 2-4 paragraphs long
-2. Capture the main topics and key points
-3. Highlight any important insights, tips, or takeaways
-4. Be written in a clear, engaging style suitable for a newsletter
+1. Be written in {language}
+2. Be 2-4 paragraphs long
+3. Capture the main topics and key points
+4. Highlight any important insights, tips, or takeaways
+5. Be written in a clear, engaging style suitable for a newsletter
 
 Video Title: {title}
 Channel: {channel}
@@ -78,7 +79,7 @@ Channel: {channel}
 Transcript:
 {transcript}
 
-Please provide a well-structured summary:"""
+Please provide a well-structured summary in {language}:"""
 
 # -----------------------------------------------------------------------------
 # Helper Functions
@@ -181,7 +182,7 @@ def get_transcript(video_id: str) -> Optional[str]:
 
 
 def summarize_with_gemini(transcript: str, title: str, channel: str, 
-                          api_key: str, model: str) -> Optional[str]:
+                          api_key: str, model: str, language: str) -> Optional[str]:
     """
     Generate a summary using Google's Gemini API.
     
@@ -191,6 +192,7 @@ def summarize_with_gemini(transcript: str, title: str, channel: str,
         channel: Channel name
         api_key: Gemini API key
         model: Model name (e.g., "gemini-1.5-flash")
+        language: The language for the summary
     
     Returns:
         The generated summary, or None on error
@@ -198,7 +200,8 @@ def summarize_with_gemini(transcript: str, title: str, channel: str,
     prompt = SUMMARIZATION_PROMPT.format(
         title=title,
         channel=channel,
-        transcript=transcript
+        transcript=transcript,
+        language=language
     )
     
     url = LLM_ENDPOINTS["gemini"].format(model=model) + f"?key={api_key}"
@@ -248,7 +251,7 @@ def summarize_with_gemini(transcript: str, title: str, channel: str,
 
 
 def summarize_with_groq(transcript: str, title: str, channel: str,
-                        api_key: str, model: str) -> Optional[str]:
+                        api_key: str, model: str, language: str) -> Optional[str]:
     """
     Generate a summary using Groq's API.
     
@@ -258,6 +261,7 @@ def summarize_with_groq(transcript: str, title: str, channel: str,
         channel: Channel name
         api_key: Groq API key
         model: Model name (e.g., "llama-3.1-70b-versatile")
+        language: The language for the summary
     
     Returns:
         The generated summary, or None on error
@@ -265,7 +269,8 @@ def summarize_with_groq(transcript: str, title: str, channel: str,
     prompt = SUMMARIZATION_PROMPT.format(
         title=title,
         channel=channel,
-        transcript=transcript
+        transcript=transcript,
+        language=language
     )
     
     url = LLM_ENDPOINTS["groq"]
@@ -334,13 +339,14 @@ def generate_summary(transcript: str, title: str, channel: str,
     """
     provider = llm_config.get("provider", "gemini").lower()
     model = llm_config.get("model", "gemini-1.5-flash")
+    language = llm_config.get("language", "English")
     
-    logger.info(f"Generating summary using {provider} ({model})")
+    logger.info(f"Generating summary using {provider} ({model}) in {language}")
     
     if provider == "gemini":
-        return summarize_with_gemini(transcript, title, channel, api_key, model)
+        return summarize_with_gemini(transcript, title, channel, api_key, model, language)
     elif provider == "groq":
-        return summarize_with_groq(transcript, title, channel, api_key, model)
+        return summarize_with_groq(transcript, title, channel, api_key, model, language)
     else:
         logger.error(f"Unknown LLM provider: {provider}")
         return None
@@ -425,10 +431,9 @@ def mark_video_failed(table, video_id: str, error: str) -> None:
                 "pk": f"VIDEO#{video_id}",
                 "sk": "METADATA"
             },
-            UpdateExpression="SET #status = :status, #error = :error, failed_at = :failed_at",
+            UpdateExpression="SET #status = :status, error = :error, failed_at = :failed_at",
             ExpressionAttributeNames={
-                "#status": "status",
-                "#error": "error"  # 'error' is a reserved keyword in DynamoDB
+                "#status": "status"
             },
             ExpressionAttributeValues={
                 ":status": "FAILED",

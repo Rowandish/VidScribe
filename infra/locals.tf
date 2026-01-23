@@ -36,6 +36,7 @@ locals {
   llm_config = jsonencode({
     provider = var.llm_provider
     model    = var.llm_model
+    language = var.summarization_language
   })
 
   # Calculate TTL timestamp (used for DynamoDB records)

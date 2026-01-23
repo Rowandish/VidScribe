@@ -175,6 +175,12 @@ variable "llm_model" {
   default     = "gemini-1.5-flash"
 }
 
+variable "summarization_language" {
+  description = "Language in which the summary should be written (e.g., English, Italian, Spanish)"
+  type        = string
+  default     = "English"
+}
+
 # -----------------------------------------------------------------------------
 # Sensitive Variables (should be passed via environment or secrets)
 # -----------------------------------------------------------------------------

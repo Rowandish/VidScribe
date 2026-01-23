@@ -218,7 +218,11 @@ youtube_channels = "[\"CHANNEL_ID_1\", \"CHANNEL_ID_2\"]"
 # LLM Configuration (choose one)
 llm_provider = "gemini"  # or "groq"
 llm_model    = "gemini-1.5-flash"  # or "llama-3.1-70b-versatile"
+summarization_language = "Italian"
 ```
+
+> [!TIP]
+> **GitHub Actions Users**: Since `terraform.tfvars` is not committed to Git, you should set your preferred language as a **Repository Variable** in GitHub (Settings -> Secrets and variables -> Actions -> Variables) with the name `SUMMARIZATION_LANGUAGE`.
 
 ### Step 4: Set API Keys
 
