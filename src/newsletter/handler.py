@@ -20,6 +20,12 @@ from typing import Any
 import boto3
 from botocore.exceptions import ClientError
 
+try:
+    import markdown
+except ImportError:
+    # Fallback for local testing if markdown is not installed
+    markdown = None
+
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
@@ -347,28 +353,29 @@ def get_weekly_summaries(table) -> list[dict]:
 
 def format_summary_html(summary_text: str) -> str:
     """
-    Convert plain text summary to HTML with paragraphs.
+    Convert Markdown summary to HTML.
     
     Args:
-        summary_text: The plain text summary
+        summary_text: The Markdown format summary
     
     Returns:
-        HTML formatted string with <p> tags
+        HTML formatted string
     """
+    if markdown:
+        # Convert markdown to HTML
+        return markdown.markdown(summary_text)
+    
+    # Fallback if markdown library is missing
     # Split by double newlines or single newlines
     paragraphs = summary_text.strip().split("\n\n")
-    
-    # If no double newlines, try single newlines
     if len(paragraphs) == 1:
         paragraphs = summary_text.strip().split("\n")
     
-    # Wrap each paragraph in <p> tags
     html_parts = []
     for p in paragraphs:
         p = p.strip()
         if p:
             html_parts.append(f"<p>{p}</p>")
-    
     return "\n".join(html_parts)
 
 

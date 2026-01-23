@@ -159,6 +159,9 @@ resource "aws_lambda_function" "newsletter" {
   timeout     = var.newsletter_timeout
   memory_size = var.newsletter_memory
 
+  # Attach the dependencies layer (versioned ARN)
+  layers = [aws_lambda_layer_version.dependencies.arn]
+
   environment {
     variables = {
       DYNAMODB_TABLE_NAME     = aws_dynamodb_table.videos.name
