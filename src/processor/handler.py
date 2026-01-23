@@ -15,6 +15,8 @@ Dependencies are provided via a Lambda Layer.
 import json
 import logging
 import os
+import time
+import urllib.error
 import urllib.request
 import urllib.parse
 from datetime import datetime, timezone, timedelta
@@ -33,6 +35,7 @@ try:
         VideoUnavailable,
         IpBlocked,
         RequestBlocked,
+        ResponseError,
     )
 except ImportError:
     # Fallback for local testing
@@ -40,6 +43,7 @@ except ImportError:
     NoTranscriptFound = Exception
     TranscriptsDisabled = Exception
     VideoUnavailable = Exception
+    ResponseError = Exception
 
 # -----------------------------------------------------------------------------
 # Configuration
@@ -53,6 +57,10 @@ WEBSHARE_USERNAME = os.environ.get("WEBSHARE_USERNAME")
 WEBSHARE_PASSWORD = os.environ.get("WEBSHARE_PASSWORD")
 TTL_DAYS = int(os.environ.get("TTL_DAYS", "30"))
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
+TRANSCRIPT_MAX_RETRIES = int(os.environ.get("TRANSCRIPT_MAX_RETRIES", "4"))
+TRANSCRIPT_RETRY_BASE_SECONDS = float(os.environ.get("TRANSCRIPT_RETRY_BASE_SECONDS", "1"))
+TRANSCRIPT_RETRY_MAX_SECONDS = float(os.environ.get("TRANSCRIPT_RETRY_MAX_SECONDS", "10"))
+TRANSCRIPT_MIN_INTERVAL_SECONDS = float(os.environ.get("TRANSCRIPT_MIN_INTERVAL_SECONDS", "0.5"))
 
 # Configure logging
 logger = logging.getLogger()
@@ -95,9 +103,52 @@ Please provide the newsletter-ready summary in {language}:"""
 class TranscriptBlockedError(Exception):
     """Raised when YouTube blocks transcript requests from the current IP/network."""
 
+class TransientTranscriptError(Exception):
+    """Raised when transcript download hit recoverable rate limits and should be retried by SQS."""
+
 # -----------------------------------------------------------------------------
 # Helper Functions
 # -----------------------------------------------------------------------------
+
+_last_transcript_request_time = 0.0
+
+
+def _enforce_transcript_interval() -> None:
+    """Ensure there is a short delay between consecutive transcript requests."""
+    global _last_transcript_request_time
+    now = time.monotonic()
+    elapsed = now - _last_transcript_request_time
+    if elapsed < TRANSCRIPT_MIN_INTERVAL_SECONDS:
+        time.sleep(TRANSCRIPT_MIN_INTERVAL_SECONDS - elapsed)
+        now = time.monotonic()
+    _last_transcript_request_time = now
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    """Detect whether the exception represents a YouTube 429 rate-limit response."""
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code == 429
+    if isinstance(exc, ResponseError):
+        message = str(exc).lower()
+        return "429" in message or "too many" in message
+    return False
+
+
+def _handle_rate_limit_retry(attempt: int, exc: Exception) -> None:
+    """Sleep with exponential backoff or raise when retry budget is exhausted."""
+    if attempt >= TRANSCRIPT_MAX_RETRIES:
+        raise TransientTranscriptError("Exceeded rate limit retries when fetching transcript") from exc
+    backoff = min(
+        TRANSCRIPT_RETRY_MAX_SECONDS,
+        TRANSCRIPT_RETRY_BASE_SECONDS * (2 ** (attempt - 1)),
+    )
+    logger.warning(
+        "YouTube rate limit hit (attempt %d/%d) for video: sleeping %.1fs before retrying",
+        attempt,
+        TRANSCRIPT_MAX_RETRIES,
+        backoff,
+    )
+    time.sleep(backoff)
 
 
 def get_ssm_parameter(name: str, with_decryption: bool = False) -> str:
@@ -125,7 +176,11 @@ def calculate_ttl() -> int:
     return int(expiry_time.timestamp())
 
 
-def get_transcript(video_id: str, proxy_username: Optional[str] = None, proxy_password: Optional[str] = None) -> Optional[str]:
+def get_transcript(
+    video_id: str,
+    proxy_username: Optional[str] = None,
+    proxy_password: Optional[str] = None,
+) -> Optional[str]:
     """
     Download the transcript for a YouTube video using youtube-transcript-api (new API).
 
@@ -137,148 +192,85 @@ def get_transcript(video_id: str, proxy_username: Optional[str] = None, proxy_pa
     Returns:
         The transcript text, or None if unavailable.
         Raises TranscriptBlockedError if YouTube blocks requests from this IP/network.
+        Raises TransientTranscriptError when rate limits require requeues.
     """
     if YouTubeTranscriptApi is None:
         logger.error("youtube-transcript-api not available")
         return None
 
-    try:
-        # If proxy credentials are provided, use WebshareProxyConfig
-        if proxy_username and proxy_password:
-            logger.info(f"Using Webshare proxy for video {video_id}")
-            ytt_api = YouTubeTranscriptApi(
-                proxy_config=WebshareProxyConfig(
-                    proxy_username=proxy_username,
-                    proxy_password=proxy_password,
+    for attempt in range(1, TRANSCRIPT_MAX_RETRIES + 1):
+        logger.info(f"Attempt {attempt} for video {video_id}")
+        try:
+            _enforce_transcript_interval()
+
+            if proxy_username and proxy_password:
+                logger.info(f"Using Webshare proxy for video {video_id}")
+                ytt_api = YouTubeTranscriptApi(
+                    proxy_config=WebshareProxyConfig(
+                        proxy_username=proxy_username,
+                        proxy_password=proxy_password,
+                    )
                 )
-            )
-        else:
-            ytt_api = YouTubeTranscriptApi()
+            else:
+                ytt_api = YouTubeTranscriptApi()
+                logger.error(f"Using default proxy for video, it wil probably fail {video_id}. Username: {proxy_username}. Password: {proxy_password[:3]}***...")
 
-        # New API: list available transcripts
-        transcript_list = ytt_api.list(video_id)
+            transcript_list = ytt_api.list(video_id)
 
-        transcript = None
-
-        try:
-            transcript = transcript_list.find_manually_created_transcript(["en", "en-US", "en-GB"])
-        except NoTranscriptFound:
+            transcript = None
             try:
-                transcript = transcript_list.find_generated_transcript(["en", "en-US", "en-GB"])
+                transcript = transcript_list.find_manually_created_transcript(["en", "en-US", "en-GB"])
             except NoTranscriptFound:
-                # Try any transcript and translate to English
                 try:
-                    for t in transcript_list:
-                        transcript = t.translate("en")
-                        break
-                except Exception as e:
-                    logger.warning(f"Could not translate transcript: {e}")
+                    transcript = transcript_list.find_generated_transcript(["en", "en-US", "en-GB"])
+                except NoTranscriptFound:
+                    try:
+                        for t in transcript_list:
+                            transcript = t.translate("en")
+                            break
+                    except Exception as e:
+                        logger.warning(f"Could not translate transcript: {e}")
 
-        if transcript is None:
-            logger.warning(f"No usable transcript found for video {video_id}")
+            if transcript is None:
+                logger.warning(f"No usable transcript found for video {video_id}")
+                return None
+
+            transcript_snippets = transcript.fetch()
+            full_text = " ".join([s.text for s in transcript_snippets])
+
+            max_chars = 30000
+            if len(full_text) > max_chars:
+                logger.info(f"Truncating transcript from {len(full_text)} to {max_chars} chars")
+                full_text = full_text[:max_chars] + "... [transcript truncated]"
+
+            logger.info(f"Successfully retrieved transcript for video {video_id} ({len(full_text)} chars)")
+            return full_text
+
+        except (ResponseError, urllib.error.HTTPError) as exc:
+            if _is_rate_limit_error(exc):
+                _handle_rate_limit_retry(attempt, exc)
+                continue
+            logger.error(f"Error getting transcript for video {video_id}: {exc}")
             return None
 
-        # New API: fetch() returns snippet objects with a .text attribute
-        transcript_snippets = transcript.fetch()
-        full_text = " ".join([s.text for s in transcript_snippets])
+        except (IpBlocked, RequestBlocked) as exc:
+            msg = f"YouTube blocked transcript requests from this environment: {exc}"
+            logger.warning(msg)
+            raise TranscriptBlockedError(msg) from exc
 
-        # Truncate for LLM context limits
-        max_chars = 30000
-        if len(full_text) > max_chars:
-            logger.info(f"Truncating transcript from {len(full_text)} to {max_chars} chars")
-            full_text = full_text[:max_chars] + "... [transcript truncated]"
-
-        logger.info(f"Successfully retrieved transcript for video {video_id} ({len(full_text)} chars)")
-        return full_text
-
-    except (IpBlocked, RequestBlocked) as e:
-        # This is the important part for AWS Lambda: cloud IPs often get blocked
-        msg = f"YouTube blocked transcript requests from this environment: {e}"
-        logger.warning(msg)
-        raise TranscriptBlockedError(msg) from e
-
-    except TranscriptsDisabled:
-        logger.warning(f"Transcripts are disabled for video {video_id}")
-        return None
-
-    except VideoUnavailable:
-        logger.warning(f"Video {video_id} is unavailable")
-        return None
-
-    except Exception as e:
-        logger.error(f"Error getting transcript for video {video_id}: {e}")
-        return None
-
-    """
-    Download the transcript for a YouTube video using youtube-transcript-api (new API).
-
-    Attempts to get transcripts in order of preference:
-    1. Manually created English transcript
-    2. Auto-generated English transcript
-    3. Any available transcript (auto-translated to English)
-
-    Args:
-        video_id: The YouTube video ID
-
-    Returns:
-        The transcript text, or None if unavailable
-    """
-    if YouTubeTranscriptApi is None:
-        logger.error("youtube-transcript-api not available")
-        return None
-
-    try:
-        # New API uses an instance with .list() / .fetch()
-        ytt_api = YouTubeTranscriptApi()
-
-        # List available transcripts for this video
-        transcript_list = ytt_api.list(video_id)
-
-        # Priority: manual English > auto English > translated to English
-        transcript = None
-
-        try:
-            # Try manually created English transcript first
-            transcript = transcript_list.find_manually_created_transcript(["en", "en-US", "en-GB"])
-        except NoTranscriptFound:
-            try:
-                # Try auto-generated English
-                transcript = transcript_list.find_generated_transcript(["en", "en-US", "en-GB"])
-            except NoTranscriptFound:
-                # Get any available transcript and translate to English
-                try:
-                    for t in transcript_list:
-                        transcript = t.translate("en")
-                        break
-                except Exception as e:
-                    logger.warning(f"Could not translate transcript: {e}")
-
-        if transcript is None:
-            logger.warning(f"No usable transcript found for video {video_id}")
+        except TranscriptsDisabled:
+            logger.warning(f"Transcripts are disabled for video {video_id}")
             return None
 
-        # Fetch transcript (new API returns objects with a .text attribute)
-        transcript_snippets = transcript.fetch()
-        full_text = " ".join([s.text for s in transcript_snippets])
+        except VideoUnavailable:
+            logger.warning(f"Video {video_id} is unavailable")
+            return None
 
-        # Truncate if too long (to stay within LLM context limits)
-        max_chars = 30000  # ~7500 tokens for most models
-        if len(full_text) > max_chars:
-            logger.info(f"Truncating transcript from {len(full_text)} to {max_chars} chars")
-            full_text = full_text[:max_chars] + "... [transcript truncated]"
+        except Exception as exc:
+            logger.error(f"Error getting transcript for video {video_id}: {exc}")
+            return None
 
-        logger.info(f"Successfully retrieved transcript for video {video_id} ({len(full_text)} chars)")
-        return full_text
-
-    except TranscriptsDisabled:
-        logger.warning(f"Transcripts are disabled for video {video_id}")
-        return None
-    except VideoUnavailable:
-        logger.warning(f"Video {video_id} is unavailable")
-        return None
-    except Exception as e:
-        logger.error(f"Error getting transcript for video {video_id}: {e}")
-        return None
+    return None
 
 def summarize_with_gemini(transcript: str, title: str, channel: str, 
                           api_key: str, model: str, language: str) -> Optional[str]:
@@ -620,9 +612,12 @@ def lambda_handler(event: dict, context: Any) -> dict:
                     proxy_password=webshare_password
                 )
             except TranscriptBlockedError as e:
-                # Cloud IP blocked: don't retry forever; classify explicitly
                 logger.warning(f"Transcript blocked for video {video_id}: {e}")
                 mark_video_failed(table, video_id, str(e), failure_reason="YOUTUBE_BLOCKED")
+                continue
+            except TransientTranscriptError as e:
+                logger.warning(f"Transient transcript failure for video {video_id}: {e}")
+                batch_item_failures.append({"itemIdentifier": message_id})
                 continue
 
             if transcript is None:

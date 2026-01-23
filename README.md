@@ -285,6 +285,7 @@ You can update settings without redeploying:
 
 ```bash
 # Update YouTube channels
+aws ssm get-parameter --name /vidscribe/youtube_channels --query Parameter.Value --output text
 aws ssm put-parameter \
   --name "/vidscribe/youtube_channels" \
   --value '["UCnew123", "UCother456"]' \
@@ -298,6 +299,15 @@ aws ssm put-parameter \
   --type SecureString \
   --overwrite
 ```
+
+### YouTube transcript resiliency
+
+The processor Lambda spaces YouTube requests by default and retries up to 4 times whenever YouTube returns HTTP 429 before returning the message to SQS for later reprocessing. You can tune the policy by setting the following optional environment variables on the processor Lambda (via `infra/lambda.tf`, Terraform locals or the AWS Console):
+
+- `TRANSCRIPT_MAX_RETRIES` (default 4)
+- `TRANSCRIPT_RETRY_BASE_SECONDS` (default 1)
+- `TRANSCRIPT_RETRY_MAX_SECONDS` (default 10)
+- `TRANSCRIPT_MIN_INTERVAL_SECONDS` (default 0.5)
 
 ---
 
