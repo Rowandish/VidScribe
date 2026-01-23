@@ -162,7 +162,15 @@ jobs:
           TF_VAR_destination_email: ${{ vars.DESTINATION_EMAIL || '' }}
           TF_VAR_admin_email: ${{ vars.ADMIN_EMAIL || '' }}
           TF_VAR_summarization_language: ${{ vars.SUMMARIZATION_LANGUAGE || 'English' }}
-      
+
+      - name: Terraform Show (human readable)
+        working-directory: infra
+        run: terraform show -no-color tfplan | sed -n '1,220p'
+
+      - name: Terraform Show (layer diff only)
+        working-directory: infra
+        run: terraform show -no-color tfplan | grep -n "aws_lambda_layer_version.dependencies" -n || true
+
       - name: Upload Deployment Bundle
         uses: actions/upload-artifact@v4
         with:
@@ -213,7 +221,12 @@ jobs:
             -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
             -backend-config="dynamodb_table=${{ secrets.TF_LOCK_TABLE }}" \
             -backend-config="region=${{ env.AWS_REGION }}"
-      
+
+      - name: Debug - layer zip sha256 (after download)
+        run: |
+          ls -la packages || true
+          sha256sum packages/dependencies-layer.zip || true
+
       - name: Terraform Apply
         working-directory: infra
         run: terraform apply -auto-approve tfplan
