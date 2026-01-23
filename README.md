@@ -155,6 +155,7 @@ Before you begin, ensure you have:
 | **YouTube Data API v3** | Fetch channel videos | [Google Cloud Console](https://console.cloud.google.com/apis/library/youtube.googleapis.com) |
 | **Gemini API** | AI summarization | [Google AI Studio](https://aistudio.google.com/app/apikey) |
 | **Groq API** (alternative) | AI summarization | [Groq Console](https://console.groq.com/keys) |
+| **Webshare Proxy** | Avoid IP blocking | [Webshare Dashboard](https://www.webshare.io/) |
 
 ### 🖥️ Windows vs Linux/Mac
 
@@ -230,12 +231,16 @@ summarization_language = "Italian"
 ```bash
 export TF_VAR_youtube_api_key="YOUR_YOUTUBE_API_KEY"
 export TF_VAR_llm_api_key="YOUR_GEMINI_OR_GROQ_API_KEY"
+export TF_VAR_webshare_username="YOUR_WEBSHARE_USERNAME"
+export TF_VAR_webshare_password="YOUR_WEBSHARE_PASSWORD"
 ```
 
 **Windows (PowerShell):**
 ```powershell
 $env:TF_VAR_youtube_api_key="YOUR_YOUTUBE_API_KEY"
 $env:TF_VAR_llm_api_key="YOUR_GEMINI_OR_GROQ_API_KEY"
+$env:TF_VAR_webshare_username="YOUR_WEBSHARE_USERNAME"
+$env:TF_VAR_webshare_password="YOUR_WEBSHARE_PASSWORD"
 ```
 
 ### Step 5: Deploy
@@ -306,6 +311,8 @@ For automated deployments, configure the following secrets in your GitHub reposi
 | `TF_LOCK_TABLE` | DynamoDB table name (usually `vidscribe-terraform-lock`) |
 | `TF_VAR_YOUTUBE_API_KEY` | YouTube Data API key |
 | `TF_VAR_LLM_API_KEY` | Gemini or Groq API key |
+| `TF_VAR_webshare_username` | Webshare proxy username |
+| `TF_VAR_webshare_password` | Webshare proxy password |
 
 Optional repository variables:
 

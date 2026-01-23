@@ -26,6 +26,7 @@ from botocore.exceptions import ClientError
 # Import youtube-transcript-api from Lambda Layer
 try:
     from youtube_transcript_api import YouTubeTranscriptApi
+    from youtube_transcript_api.proxies import WebshareProxyConfig
     from youtube_transcript_api._errors import (
         NoTranscriptFound,
         TranscriptsDisabled,
@@ -48,6 +49,8 @@ except ImportError:
 DYNAMODB_TABLE_NAME = os.environ.get("DYNAMODB_TABLE_NAME", "vidscribe-videos")
 SSM_LLM_CONFIG = os.environ.get("SSM_LLM_CONFIG", "/vidscribe/llm_config")
 SSM_LLM_API_KEY = os.environ.get("SSM_LLM_API_KEY", "/vidscribe/llm_api_key")
+SSM_WEBSHARE_USERNAME = os.environ.get("SSM_WEBSHARE_USERNAME", "/vidscribe/webshare_username")
+SSM_WEBSHARE_PASSWORD = os.environ.get("SSM_WEBSHARE_PASSWORD", "/vidscribe/webshare_password")
 TTL_DAYS = int(os.environ.get("TTL_DAYS", "30"))
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
 
@@ -116,7 +119,7 @@ def calculate_ttl() -> int:
     return int(expiry_time.timestamp())
 
 
-def get_transcript(video_id: str) -> Optional[str]:
+def get_transcript(video_id: str, proxy_username: Optional[str] = None, proxy_password: Optional[str] = None) -> Optional[str]:
     """
     Download the transcript for a YouTube video using youtube-transcript-api (new API).
 
@@ -134,7 +137,17 @@ def get_transcript(video_id: str) -> Optional[str]:
         return None
 
     try:
-        ytt_api = YouTubeTranscriptApi()
+        # If proxy credentials are provided, use WebshareProxyConfig
+        if proxy_username and proxy_password:
+            logger.info(f"Using Webshare proxy for video {video_id}")
+            ytt_api = YouTubeTranscriptApi(
+                proxy_config=WebshareProxyConfig(
+                    proxy_username=proxy_username,
+                    proxy_password=proxy_password,
+                )
+            )
+        else:
+            ytt_api = YouTubeTranscriptApi()
 
         # New API: list available transcripts
         transcript_list = ytt_api.list(video_id)
@@ -564,6 +577,17 @@ def lambda_handler(event: dict, context: Any) -> dict:
         llm_config_json = get_ssm_parameter(SSM_LLM_CONFIG)
         llm_config = json.loads(llm_config_json)
         llm_api_key = get_ssm_parameter(SSM_LLM_API_KEY, with_decryption=True)
+        
+        # Load Webshare credentials (optional)
+        webshare_username = None
+        webshare_password = None
+        try:
+            webshare_username = get_ssm_parameter(SSM_WEBSHARE_USERNAME)
+            webshare_password = get_ssm_parameter(SSM_WEBSHARE_PASSWORD, with_decryption=True)
+            logger.info("Webshare credentials loaded successfully")
+        except Exception:
+            logger.info("Webshare credentials not found or incomplete, proceeding without proxy")
+
     except Exception as e:
         logger.error(f"Failed to load LLM configuration: {e}")
         # Fail all items if we can't get configuration
@@ -586,7 +610,11 @@ def lambda_handler(event: dict, context: Any) -> dict:
             
             # Step 1: Download the transcript
             try:
-                transcript = get_transcript(video_id)
+                transcript = get_transcript(
+                    video_id, 
+                    proxy_username=webshare_username, 
+                    proxy_password=webshare_password
+                )
             except TranscriptBlockedError as e:
                 # Cloud IP blocked: don't retry forever; classify explicitly
                 logger.warning(f"Transcript blocked for video {video_id}: {e}")

@@ -196,3 +196,15 @@ variable "llm_api_key" {
   type        = string
   default     = ""
 }
+
+variable "webshare_username" {
+  description = "Webshare proxy username (stored in SSM)"
+  type        = string
+  default     = ""
+}
+
+variable "webshare_password" {
+  description = "Webshare proxy password (stored in SSM as SecureString)"
+  type        = string
+  default     = ""
+}
