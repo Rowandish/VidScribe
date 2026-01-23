@@ -20,8 +20,8 @@ resource "aws_lambda_layer_version" "dependencies" {
   source_code_hash = filebase64sha256("${path.module}/../packages/dependencies-layer.zip")
 
   lifecycle {
-    # Ignore changes to source_code_hash to prevent unnecessary updates
-    ignore_changes = []
+    # Create the new layer version first, then update functions, then remove the old version.
+    create_before_destroy = true
   }
 }
 
@@ -70,13 +70,13 @@ resource "aws_lambda_function" "poller" {
 
   environment {
     variables = {
-      DYNAMODB_TABLE_NAME    = aws_dynamodb_table.videos.name
-      SQS_QUEUE_URL          = aws_sqs_queue.video_queue.url
-      SSM_YOUTUBE_CHANNELS   = aws_ssm_parameter.youtube_channels.name
-      SSM_YOUTUBE_API_KEY    = aws_ssm_parameter.youtube_api_key.name
-      TTL_DAYS               = var.dynamodb_ttl_days
+      DYNAMODB_TABLE_NAME     = aws_dynamodb_table.videos.name
+      SQS_QUEUE_URL           = aws_sqs_queue.video_queue.url
+      SSM_YOUTUBE_CHANNELS    = aws_ssm_parameter.youtube_channels.name
+      SSM_YOUTUBE_API_KEY     = aws_ssm_parameter.youtube_api_key.name
+      TTL_DAYS                = var.dynamodb_ttl_days
       POWERTOOLS_SERVICE_NAME = "vidscribe-poller"
-      LOG_LEVEL              = "INFO"
+      LOG_LEVEL               = "INFO"
     }
   }
 
@@ -86,10 +86,6 @@ resource "aws_lambda_function" "poller" {
   tags = {
     Name     = "Poller Lambda"
     Function = "poller"
-  }
-
-  lifecycle {
-    ignore_changes = [source_code_hash]
   }
 }
 
@@ -111,7 +107,7 @@ resource "aws_lambda_function" "processor" {
   timeout     = var.processor_timeout
   memory_size = var.processor_memory
 
-  # Attach the dependencies layer
+  # Attach the dependencies layer (versioned ARN)
   layers = [aws_lambda_layer_version.dependencies.arn]
 
   environment {
@@ -130,10 +126,6 @@ resource "aws_lambda_function" "processor" {
   tags = {
     Name     = "Processor Lambda"
     Function = "processor"
-  }
-
-  lifecycle {
-    ignore_changes = [source_code_hash]
   }
 }
 
@@ -181,9 +173,5 @@ resource "aws_lambda_function" "newsletter" {
   tags = {
     Name     = "Newsletter Lambda"
     Function = "newsletter"
-  }
-
-  lifecycle {
-    ignore_changes = [source_code_hash]
   }
 }

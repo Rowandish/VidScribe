@@ -20,6 +20,11 @@ resource "aws_ssm_parameter" "youtube_channels" {
   tags = {
     Name = "YouTube Channels Configuration"
   }
+
+  lifecycle {
+    # Ignore changes to value - users will update this via console/CLI
+    ignore_changes = [value]
+  }
 }
 
 # -----------------------------------------------------------------------------
@@ -36,6 +41,11 @@ resource "aws_ssm_parameter" "destination_email" {
   tags = {
     Name = "Destination Email"
   }
+
+  lifecycle {
+    # Ignore changes to value - users will update this via console/CLI
+    ignore_changes = [value]
+  }
 }
 
 resource "aws_ssm_parameter" "sender_email" {
@@ -47,6 +57,11 @@ resource "aws_ssm_parameter" "sender_email" {
 
   tags = {
     Name = "Sender Email"
+  }
+
+  lifecycle {
+    # Ignore changes to value - users will update this via console/CLI
+    ignore_changes = [value]
   }
 }
 
@@ -63,6 +78,11 @@ resource "aws_ssm_parameter" "llm_config" {
 
   tags = {
     Name = "LLM Configuration"
+  }
+
+  lifecycle {
+    # Ignore changes to value - users will update this via console/CLI
+    ignore_changes = [value]
   }
 }
 

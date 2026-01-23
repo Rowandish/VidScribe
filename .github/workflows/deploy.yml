@@ -88,7 +88,10 @@ jobs:
         run: |
           chmod +x scripts/build_layers.sh
           ./scripts/build_layers.sh
-      
+
+      - name: Print layer hash
+        run: sha256sum packages/dependencies-layer.zip
+
       - name: Upload Lambda Layer
         uses: actions/upload-artifact@v4
         with:
