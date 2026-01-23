@@ -73,7 +73,8 @@ class TestProcessorLambda:
             title="Test Video",
             channel="Test Channel",
             api_key="test-api-key",
-            model="gemini-1.5-flash"
+            model="gemini-1.5-flash",
+            language="English"
         )
         
         assert result == "This is a summary of the video content."
@@ -101,7 +102,8 @@ class TestProcessorLambda:
             title="Test Video",
             channel="Test Channel",
             api_key="test-api-key",
-            model="llama-3.1-70b-versatile"
+            model="llama-3.1-70b-versatile",
+            language="English"
         )
         
         assert result == "This is a Groq-generated summary."
