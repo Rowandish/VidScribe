@@ -14,39 +14,61 @@ class TestProcessorLambda:
     """Test cases for the Processor Lambda handler."""
     
     @mock_aws
-    def test_get_transcript_success(self):
-        """Test successful transcript retrieval."""
-        with patch("src.processor.handler.YouTubeTranscriptApi") as mock_api:
-            # Setup mock
-            mock_transcript = MagicMock()
-            mock_transcript.fetch.return_value = [
-                {"text": "Hello, welcome to my video."},
-                {"text": "Today we will discuss testing."}
-            ]
-            
-            mock_transcript_list = MagicMock()
-            mock_transcript_list.find_manually_created_transcript.return_value = mock_transcript
-            mock_api.list_transcripts.return_value = mock_transcript_list
-            
-            from src.processor.handler import get_transcript
-            
-            result = get_transcript("test-video-id")
-            
-            assert result is not None
-            assert "Hello, welcome to my video" in result
-            assert "Today we will discuss testing" in result
+def test_get_transcript_success(self):
+    """Test successful transcript retrieval (new youtube-transcript-api API)."""
+    with patch("src.processor.handler.YouTubeTranscriptApi") as mock_api_cls:
+        # YouTubeTranscriptApi() returns an instance with .list()
+        mock_api = MagicMock()
+        mock_api_cls.return_value = mock_api
+
+        # Transcript object returned by transcript_list.find_manually_created_transcript(...)
+        mock_transcript = MagicMock()
+
+        # New API: transcript.fetch() returns iterable of snippet objects with .text
+        mock_transcript.fetch.return_value = [
+            MagicMock(text="Hello, welcome to my video."),
+            MagicMock(text="Today we will discuss testing.")
+        ]
+
+        # TranscriptList returned by ytt_api.list(video_id)
+        mock_transcript_list = MagicMock()
+        mock_transcript_list.find_manually_created_transcript.return_value = mock_transcript
+
+        # ytt_api.list(video_id) returns transcript_list
+        mock_api.list.return_value = mock_transcript_list
+
+        from src.processor.handler import get_transcript
+
+        result = get_transcript("test-video-id")
+
+        assert result is not None
+        assert "Hello, welcome to my video" in result
+        assert "Today we will discuss testing" in result
+
+        # Optional: verify correct calls
+        mock_api.list.assert_called_once_with("test-video-id")
+        mock_transcript_list.find_manually_created_transcript.assert_called_once()
+        mock_transcript.fetch.assert_called_once()
+
     
     @mock_aws
-    def test_get_transcript_disabled(self):
-        """Test handling of disabled transcripts."""
-        with patch("src.processor.handler.YouTubeTranscriptApi") as mock_api:
-            from src.processor.handler import TranscriptsDisabled, get_transcript
-            
-            mock_api.list_transcripts.side_effect = TranscriptsDisabled("video-id")
-            
-            result = get_transcript("test-video-id")
-            
-            assert result is None
+def test_get_transcript_disabled(self):
+    """Test handling of disabled transcripts (new youtube-transcript-api API)."""
+    with patch("src.processor.handler.YouTubeTranscriptApi") as mock_api_cls:
+        from src.processor.handler import TranscriptsDisabled, get_transcript
+
+        # YouTubeTranscriptApi() returns an instance with .list()
+        mock_api = MagicMock()
+        mock_api_cls.return_value = mock_api
+
+        # New API raises from the instance method .list(video_id)
+        mock_api.list.side_effect = TranscriptsDisabled("video-id")
+
+        result = get_transcript("test-video-id")
+
+        assert result is None
+        mock_api.list.assert_called_once_with("test-video-id")
+
     
     @patch("urllib.request.urlopen")
     def test_summarize_with_gemini_success(self, mock_urlopen):

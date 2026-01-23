@@ -113,30 +113,33 @@ def calculate_ttl() -> int:
 
 def get_transcript(video_id: str) -> Optional[str]:
     """
-    Download the transcript for a YouTube video.
-    
+    Download the transcript for a YouTube video using youtube-transcript-api (new API).
+
     Attempts to get transcripts in order of preference:
     1. Manually created English transcript
     2. Auto-generated English transcript
     3. Any available transcript (auto-translated to English)
-    
+
     Args:
         video_id: The YouTube video ID
-    
+
     Returns:
         The transcript text, or None if unavailable
     """
     if YouTubeTranscriptApi is None:
         logger.error("youtube-transcript-api not available")
         return None
-    
+
     try:
-        # Try to get English transcript (manual or auto-generated)
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-        
+        # New API uses an instance with .list() / .fetch()
+        ytt_api = YouTubeTranscriptApi()
+
+        # List available transcripts for this video
+        transcript_list = ytt_api.list(video_id)
+
         # Priority: manual English > auto English > translated to English
         transcript = None
-        
+
         try:
             # Try manually created English transcript first
             transcript = transcript_list.find_manually_created_transcript(["en", "en-US", "en-GB"])
@@ -152,24 +155,24 @@ def get_transcript(video_id: str) -> Optional[str]:
                         break
                 except Exception as e:
                     logger.warning(f"Could not translate transcript: {e}")
-        
+
         if transcript is None:
             logger.warning(f"No usable transcript found for video {video_id}")
             return None
-        
-        # Fetch and combine transcript text
-        transcript_data = transcript.fetch()
-        full_text = " ".join([entry["text"] for entry in transcript_data])
-        
+
+        # Fetch transcript (new API returns objects with a .text attribute)
+        transcript_snippets = transcript.fetch()
+        full_text = " ".join([s.text for s in transcript_snippets])
+
         # Truncate if too long (to stay within LLM context limits)
         max_chars = 30000  # ~7500 tokens for most models
         if len(full_text) > max_chars:
             logger.info(f"Truncating transcript from {len(full_text)} to {max_chars} chars")
             full_text = full_text[:max_chars] + "... [transcript truncated]"
-        
+
         logger.info(f"Successfully retrieved transcript for video {video_id} ({len(full_text)} chars)")
         return full_text
-        
+
     except TranscriptsDisabled:
         logger.warning(f"Transcripts are disabled for video {video_id}")
         return None
@@ -179,7 +182,6 @@ def get_transcript(video_id: str) -> Optional[str]:
     except Exception as e:
         logger.error(f"Error getting transcript for video {video_id}: {e}")
         return None
-
 
 def summarize_with_gemini(transcript: str, title: str, channel: str, 
                           api_key: str, model: str, language: str) -> Optional[str]:
