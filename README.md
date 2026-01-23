@@ -372,6 +372,12 @@ aws sqs get-queue-attributes \
 
 # View CloudWatch logs
 aws logs tail /aws/lambda/vidscribe-prod-poller --follow
+
+# Manual Video Injection (Test a specific video)
+# Windows:
+.\scripts\inject_video.ps1 -VideoId "jH9BCOpL_bY"
+# Linux/Mac:
+./scripts/inject_video.sh "jH9BCOpL_bY"
 ```
 
 ---
