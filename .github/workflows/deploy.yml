@@ -89,15 +89,8 @@ jobs:
           chmod +x scripts/build_layers.sh
           ./scripts/build_layers.sh
 
-      - name: Debug layer hash + requirements
-        run: |
-          echo "requirements.txt:"
-          cat src/processor/requirements.txt
-          echo ""
-          echo "layer zip sha256:"
-          sha256sum packages/dependencies-layer.zip
-          echo ""
-          unzip -p packages/dependencies-layer.zip python/youtube_transcript_api/__init__.py | head -20 || true
+      - name: Print layer hash
+        run: sha256sum packages/dependencies-layer.zip
 
       - name: Upload Lambda Layer
         uses: actions/upload-artifact@v4
