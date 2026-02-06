@@ -26,7 +26,7 @@ from botocore.exceptions import ClientError
 # Import youtube-transcript-api from Lambda Layer
 try:
     from youtube_transcript_api import YouTubeTranscriptApi
-    from youtube_transcript_api.proxies import WebshareProxyConfig
+    from youtube_transcript_api.proxies import WebshareProxyConfig, GenericProxyConfig
     from youtube_transcript_api._errors import (
         NoTranscriptFound,
         TranscriptsDisabled,
@@ -37,6 +37,8 @@ try:
 except ImportError:
     # Fallback for local testing
     YouTubeTranscriptApi = None
+    WebshareProxyConfig = None
+    GenericProxyConfig = None
     NoTranscriptFound = Exception
     TranscriptsDisabled = Exception
     VideoUnavailable = Exception
@@ -49,10 +51,16 @@ except ImportError:
 DYNAMODB_TABLE_NAME = os.environ.get("DYNAMODB_TABLE_NAME", "vidscribe-videos")
 SSM_LLM_CONFIG = os.environ.get("SSM_LLM_CONFIG", "/vidscribe/llm_config")
 SSM_LLM_API_KEY = os.environ.get("SSM_LLM_API_KEY", "/vidscribe/llm_api_key")
-WEBSHARE_USERNAME = os.environ.get("WEBSHARE_USERNAME")
-WEBSHARE_PASSWORD = os.environ.get("WEBSHARE_PASSWORD")
 TTL_DAYS = int(os.environ.get("TTL_DAYS", "30"))
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
+
+# Proxy configuration
+# PROXY_TYPE: 'webshare', 'generic', or 'none'
+PROXY_TYPE = os.environ.get("PROXY_TYPE", "none").lower()
+WEBSHARE_USERNAME = os.environ.get("WEBSHARE_USERNAME", "")
+WEBSHARE_PASSWORD = os.environ.get("WEBSHARE_PASSWORD", "")
+GENERIC_PROXY_HTTP_URL = os.environ.get("GENERIC_PROXY_HTTP_URL", "")
+GENERIC_PROXY_HTTPS_URL = os.environ.get("GENERIC_PROXY_HTTPS_URL", "")
 
 # Configure logging
 logger = logging.getLogger()
@@ -125,9 +133,14 @@ def calculate_ttl() -> int:
     return int(expiry_time.timestamp())
 
 
-def get_transcript(video_id: str, proxy_username: Optional[str] = None, proxy_password: Optional[str] = None) -> Optional[str]:
+def get_transcript(video_id: str) -> Optional[str]:
     """
-    Download the transcript for a YouTube video using youtube-transcript-api (new API).
+    Download the transcript for a YouTube video using youtube-transcript-api.
+
+    Supports multiple proxy configurations via PROXY_TYPE env var:
+    - 'webshare': Use Webshare rotating residential proxy
+    - 'generic': Use any HTTP/HTTPS proxy (e.g. PacketStream, IPRoyal, Proxy-Cheap)
+    - 'none': Direct connection (likely to be blocked from cloud IPs)
 
     Attempts to get transcripts in order of preference:
     1. Manually created English transcript
@@ -143,18 +156,29 @@ def get_transcript(video_id: str, proxy_username: Optional[str] = None, proxy_pa
         return None
 
     try:
-        # If proxy credentials are provided, use WebshareProxyConfig
-        if proxy_username and proxy_password:
-            logger.info(f"Using Webshare proxy for video {video_id}. Username: {proxy_username}. Password:***")
-            ytt_api = YouTubeTranscriptApi(
-                proxy_config=WebshareProxyConfig(
-                    proxy_username=proxy_username,
-                    proxy_password=proxy_password,
-                )
+        # Select proxy configuration based on PROXY_TYPE
+        proxy_config = None
+        
+        if PROXY_TYPE == "webshare" and WEBSHARE_USERNAME and WEBSHARE_PASSWORD:
+            logger.info(f"Using Webshare proxy for video {video_id}")
+            proxy_config = WebshareProxyConfig(
+                proxy_username=WEBSHARE_USERNAME,
+                proxy_password=WEBSHARE_PASSWORD,
+            )
+        elif PROXY_TYPE == "generic" and (GENERIC_PROXY_HTTP_URL or GENERIC_PROXY_HTTPS_URL):
+            logger.info(f"Using generic proxy for video {video_id}")
+            proxy_config = GenericProxyConfig(
+                http_url=GENERIC_PROXY_HTTP_URL or None,
+                https_url=GENERIC_PROXY_HTTPS_URL or None,
             )
         else:
+            logger.warning(f"No proxy configured (PROXY_TYPE={PROXY_TYPE}). Direct connection may be blocked.")
+        
+        # Create API instance with or without proxy
+        if proxy_config:
+            ytt_api = YouTubeTranscriptApi(proxy_config=proxy_config)
+        else:
             ytt_api = YouTubeTranscriptApi()
-            logger.warning(f"Using default proxy for video, it wil probably fail {video_id}. Username: {proxy_username}. Password:***...")
 
         # New API: list available transcripts
         transcript_list = ytt_api.list(video_id)
@@ -585,13 +609,8 @@ def lambda_handler(event: dict, context: Any) -> dict:
         llm_config = json.loads(llm_config_json)
         llm_api_key = get_ssm_parameter(SSM_LLM_API_KEY, with_decryption=True)
         
-        # Load Webshare credentials from Lambda environment (optional)
-        webshare_username = WEBSHARE_USERNAME
-        webshare_password = WEBSHARE_PASSWORD
-        if webshare_username and webshare_password:
-            logger.info("Webshare credentials loaded from environment")
-        else:
-            logger.info("Webshare credentials not set, proceeding without proxy")
+        # Log proxy configuration
+        logger.info(f"Proxy configuration: PROXY_TYPE={PROXY_TYPE}")
 
     except Exception as e:
         logger.error(f"Failed to load LLM configuration: {e}")
@@ -615,11 +634,7 @@ def lambda_handler(event: dict, context: Any) -> dict:
             
             # Step 1: Download the transcript
             try:
-                transcript = get_transcript(
-                    video_id, 
-                    proxy_username=webshare_username, 
-                    proxy_password=webshare_password
-                )
+                transcript = get_transcript(video_id)
             except TranscriptBlockedError as e:
                 # Cloud IP blocked: don't retry forever; classify explicitly
                 logger.warning(f"Transcript blocked for video {video_id}: {e}")

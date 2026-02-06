@@ -18,24 +18,27 @@ logging.basicConfig(level=logging.INFO)
 def test_video(video_id: str):
     print(f"\n--- Testing Video: {video_id} ---")
     
-    # Check for credentials or proxy URL
-    username = os.environ.get("WEBSHARE_USERNAME")
-    password = os.environ.get("WEBSHARE_PASSWORD")
-    proxy_url = os.environ.get("WEBSHARE_PROXY_URL")
-
-    if proxy_url:
-        print(f"Using direct proxy URL: {proxy_url[:15]}...")
-    elif username and password:
-        print(f"Using Webshare credentials: {username}")
+    # Check for proxy configuration
+    proxy_type = os.environ.get("PROXY_TYPE", "none")
+    
+    if proxy_type == "webshare":
+        username = os.environ.get("WEBSHARE_USERNAME")
+        password = os.environ.get("WEBSHARE_PASSWORD")
+        if username and password:
+            print(f"Using Webshare proxy: {username}")
+        else:
+            print("PROXY_TYPE=webshare but credentials missing!")
+    elif proxy_type == "generic":
+        http_url = os.environ.get("GENERIC_PROXY_HTTP_URL", "")
+        https_url = os.environ.get("GENERIC_PROXY_HTTPS_URL", "")
+        if http_url or https_url:
+            print(f"Using generic proxy")
+        else:
+            print("PROXY_TYPE=generic but URLs missing!")
     else:
-        print("No proxy credentials found in environment. Testing without proxy.")
+        print(f"No proxy configured (PROXY_TYPE={proxy_type}). Testing direct connection.")
 
-    transcript = get_transcript(
-        video_id, 
-        proxy_username=username, 
-        proxy_password=password,
-        proxy_url=proxy_url
-    )
+    transcript = get_transcript(video_id)
     
     if transcript:
         print("SUCCESS: Transcript downloaded!")

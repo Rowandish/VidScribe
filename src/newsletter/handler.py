@@ -26,6 +26,11 @@ except ImportError:
     # Fallback for local testing if markdown is not installed
     markdown = None
 
+try:
+    from gmail_sender import GmailSender
+except ImportError:
+    GmailSender = None
+
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
@@ -36,6 +41,11 @@ SSM_DESTINATION_EMAIL = os.environ.get("SSM_DESTINATION_EMAIL", "/vidscribe/dest
 SSM_SENDER_EMAIL = os.environ.get("SSM_SENDER_EMAIL", "/vidscribe/sender_email")
 AWS_SES_REGION = os.environ.get("AWS_SES_REGION", "eu-west-1")
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
+
+# Gmail Configuration
+USE_GMAIL_SMTP = os.environ.get("USE_GMAIL_SMTP", "false").lower() == "true"
+GMAIL_SENDER = os.environ.get("GMAIL_SENDER", "")
+GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
 
 # Configure logging
 logger = logging.getLogger()
@@ -553,13 +563,30 @@ def lambda_handler(event: dict, context: Any) -> dict:
             subject = f"📺 VidScribe: {len(summaries)} New Video Summary{'s' if len(summaries) > 1 else ''} This Week"
         
         # Send the email
-        success = send_email(
-            sender=sender_email,
-            recipient=destination_email,
-            subject=subject,
-            html_body=html_body,
-            text_body=text_body
-        )
+        if USE_GMAIL_SMTP:
+            if not GMAIL_SENDER or not GMAIL_APP_PASSWORD:
+                raise ValueError("Gmail usage requested but GMAIL_SENDER or GMAIL_APP_PASSWORD missing")
+            
+            if not GmailSender:
+                 raise ImportError("GmailSender class could not be imported")
+
+            logger.info(f"Using Gmail SMTP to send email from {GMAIL_SENDER}")
+            sender_to_use = GmailSender(GMAIL_SENDER, GMAIL_APP_PASSWORD)
+            success = sender_to_use.send_email(
+                recipient=destination_email,
+                subject=subject,
+                html_body=html_body,
+                text_body=text_body
+            )
+        else:
+            logger.info(f"Using AWS SES to send email from {sender_email}")
+            success = send_email(
+                sender=sender_email,
+                recipient=destination_email,
+                subject=subject,
+                html_body=html_body,
+                text_body=text_body
+            )
         
         if success:
             return {

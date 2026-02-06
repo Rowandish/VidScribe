@@ -61,3 +61,19 @@ llm_model    = "gemini-flash-latest"
 # newsletter_timeout = 60
 # log_retention_days = 7
 # dynamodb_ttl_days  = 30
+
+# -----------------------------------------------------------------------------
+# Webshare Proxy (Optional - Recommended for YouTube)
+# -----------------------------------------------------------------------------
+# To avoid YouTube blocking cloud IPs, use a residential proxy.
+# webshare_username = "your-webshare-username"
+# webshare_password = "your-webshare-password"
+
+# -----------------------------------------------------------------------------
+# Gmail SMTP (Optional - Alternative to SES)
+# -----------------------------------------------------------------------------
+# Use Gmail to send emails if you don't want to set up SES domain verification.
+# Requires an App Password: https://myaccount.google.com/apppasswords
+# use_gmail_smtp     = true
+# gmail_sender       = "your-gmail@gmail.com"
+# gmail_app_password = "your-16-digit-app-password"

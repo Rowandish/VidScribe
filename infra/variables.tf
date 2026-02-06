@@ -208,3 +208,54 @@ variable "webshare_password" {
   type        = string
   default     = ""
 }
+
+variable "gmail_app_password" {
+  description = "Gmail App Password for SMTP authentication"
+  type        = string
+  default     = ""
+}
+
+# -----------------------------------------------------------------------------
+# Gmail Configuration (Optional - Alternative to SES)
+# -----------------------------------------------------------------------------
+
+variable "use_gmail_smtp" {
+  description = "Set to true to use Gmail SMTP instead of AWS SES"
+  type        = bool
+  default     = false
+}
+
+variable "gmail_sender" {
+  description = "Gmail address to send from (e.g. user@gmail.com)"
+  type        = string
+  default     = ""
+}
+
+# -----------------------------------------------------------------------------
+# Proxy Configuration
+# YouTube blocks requests from cloud IPs. Use a proxy to avoid blocking.
+# Options: 'webshare' (default with credentials), 'generic' (any HTTP proxy), 'none'
+# -----------------------------------------------------------------------------
+
+variable "proxy_type" {
+  description = "Proxy type: 'webshare', 'generic', or 'none'"
+  type        = string
+  default     = "none"
+
+  validation {
+    condition     = contains(["webshare", "generic", "none"], var.proxy_type)
+    error_message = "Proxy type must be 'webshare', 'generic', or 'none'."
+  }
+}
+
+variable "generic_proxy_http_url" {
+  description = "HTTP proxy URL for generic proxy (format: http://user:pass@host:port)"
+  type        = string
+  default     = ""
+}
+
+variable "generic_proxy_https_url" {
+  description = "HTTPS proxy URL for generic proxy (format: https://user:pass@host:port)"
+  type        = string
+  default     = ""
+}

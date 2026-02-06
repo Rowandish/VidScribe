@@ -156,6 +156,9 @@ Before you begin, ensure you have:
 | **Gemini API** | AI summarization | [Google AI Studio](https://aistudio.google.com/app/apikey) |
 | **Groq API** (alternative) | AI summarization | [Groq Console](https://console.groq.com/keys) |
 | **Webshare Proxy** | Avoid IP blocking | [Webshare Dashboard](https://www.webshare.io/) |
+| **Gmail App Password** | Optional: Send via Gmail | [Google Account](https://myaccount.google.com/apppasswords) |
+
+> **Warning**: YouTube frequently blocks requests arising from cloud IPs (like AWS Lambda). It is **highly recommended** to use a rotating residential proxy like Webshare. See [youtube-transcript-api workaround](https://github.com/jdepoix/youtube-transcript-api?tab=readme-ov-file#working-around-ip-bans-requestblocked-or-ipblocked-exception) for details.
 
 ### 🖥️ Windows vs Linux/Mac
 
@@ -220,6 +223,15 @@ youtube_channels = "[\"CHANNEL_ID_1\", \"CHANNEL_ID_2\"]"
 llm_provider = "gemini"  # or "groq"
 llm_model    = "gemini-flash-latest"  # or "llama-3.1-70b-versatile"
 summarization_language = "Italian"
+
+# Optional: Residential Proxy (Recommended)
+# webshare_username = "..."
+# webshare_password = "..."
+
+# Optional: Gmail SMTP (instead of SES)
+# use_gmail_smtp     = true
+# gmail_sender       = "user@gmail.com"
+# gmail_app_password = "xxxx xxxx xxxx xxxx"
 ```
 
 > [!TIP]
@@ -313,16 +325,23 @@ For automated deployments, configure the following secrets in your GitHub reposi
 | `TF_LOCK_TABLE` | DynamoDB table name (usually `vidscribe-terraform-lock`) |
 | `TF_VAR_YOUTUBE_API_KEY` | YouTube Data API key |
 | `TF_VAR_LLM_API_KEY` | Gemini or Groq API key |
-| `WEBSHARE_USERNAME` | Webshare proxy username (optional; GitHub Actions maps this to `TF_VAR_webshare_username`) |
-| `WEBSHARE_PASSWORD` | Webshare proxy password (optional; GitHub Actions maps this to `TF_VAR_webshare_password`) |
+| `WEBSHARE_USERNAME` | Webshare proxy username (optional) |
+| `WEBSHARE_PASSWORD` | Webshare proxy password (optional) |
+| `GENERIC_PROXY_HTTP_URL` | Alternative proxy HTTP URL (optional, format: `http://user:pass@host:port`) |
+| `GENERIC_PROXY_HTTPS_URL` | Alternative proxy HTTPS URL (optional) |
+| `GMAIL_APP_PASSWORD` | Gmail app password for SMTP (optional) |
 
-Optional repository variables:
+Repository variables:
 
 | Variable | Description |
 |----------|-------------|
 | `SENDER_EMAIL` | SES-verified sender email |
 | `DESTINATION_EMAIL` | Newsletter recipient email |
 | `ADMIN_EMAIL` | Error notification email |
+| `SUMMARIZATION_LANGUAGE` | Language for summaries (default: English) |
+| `PROXY_TYPE` | Proxy type: `webshare`, `generic`, or `none` |
+| `USE_GMAIL_SMTP` | Set to `true` to use Gmail instead of SES |
+| `GMAIL_SENDER` | Gmail address to send from |
 
 ---
 
@@ -382,11 +401,17 @@ aws sqs get-queue-attributes \
 # View CloudWatch logs
 aws logs tail /aws/lambda/vidscribe-prod-poller --follow
 
-# Manual Video Injection (Test a specific video)
+# Manual Video Processing (Unified Script)
 # Windows:
-.\scripts\inject_video.ps1 -VideoId "jH9BCOpL_bY"
+.\scripts\vidscribe.ps1 -Urls "https://youtube.com/watch?v=jH9BCOpL_bY"
 # Linux/Mac:
-./scripts/inject_video.sh "jH9BCOpL_bY"
+./scripts/vidscribe.sh "https://youtube.com/watch?v=jH9BCOpL_bY"
+
+# Process multiple videos:
+.\scripts\vidscribe.ps1 -Urls "video1","video2" -SkipNewsletter
+
+# Test newsletter only:
+.\scripts\vidscribe.ps1 -TestNewsletter
 ```
 
 ---

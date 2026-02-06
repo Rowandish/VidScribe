@@ -157,8 +157,16 @@ jobs:
           TF_VAR_destination_email: ${{ vars.DESTINATION_EMAIL || '' }}
           TF_VAR_admin_email: ${{ vars.ADMIN_EMAIL || '' }}
           TF_VAR_summarization_language: ${{ vars.SUMMARIZATION_LANGUAGE || 'English' }}
+          # Proxy configuration
+          TF_VAR_proxy_type: ${{ vars.PROXY_TYPE || 'none' }}
           TF_VAR_webshare_username: ${{ secrets.WEBSHARE_USERNAME }}
           TF_VAR_webshare_password: ${{ secrets.WEBSHARE_PASSWORD }}
+          TF_VAR_generic_proxy_http_url: ${{ secrets.GENERIC_PROXY_HTTP_URL }}
+          TF_VAR_generic_proxy_https_url: ${{ secrets.GENERIC_PROXY_HTTPS_URL }}
+          # Gmail SMTP configuration (optional)
+          TF_VAR_use_gmail_smtp: ${{ vars.USE_GMAIL_SMTP || 'false' }}
+          TF_VAR_gmail_sender: ${{ vars.GMAIL_SENDER || '' }}
+          TF_VAR_gmail_app_password: ${{ secrets.GMAIL_APP_PASSWORD }}
       
       - name: Upload Deployment Bundle
         uses: actions/upload-artifact@v4

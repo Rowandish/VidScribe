@@ -115,11 +115,15 @@ resource "aws_lambda_function" "processor" {
       DYNAMODB_TABLE_NAME     = aws_dynamodb_table.videos.name
       SSM_LLM_CONFIG          = aws_ssm_parameter.llm_config.name
       SSM_LLM_API_KEY         = aws_ssm_parameter.llm_api_key.name
-      WEBSHARE_USERNAME       = var.webshare_username
-      WEBSHARE_PASSWORD       = var.webshare_password
       TTL_DAYS                = var.dynamodb_ttl_days
       POWERTOOLS_SERVICE_NAME = "vidscribe-processor"
       LOG_LEVEL               = "INFO"
+      # Proxy configuration - passed directly to avoid SSM reads
+      PROXY_TYPE              = var.proxy_type
+      WEBSHARE_USERNAME       = var.webshare_username
+      WEBSHARE_PASSWORD       = var.webshare_password
+      GENERIC_PROXY_HTTP_URL  = var.generic_proxy_http_url
+      GENERIC_PROXY_HTTPS_URL = var.generic_proxy_https_url
     }
   }
 
@@ -170,6 +174,10 @@ resource "aws_lambda_function" "newsletter" {
       AWS_SES_REGION          = var.aws_region
       POWERTOOLS_SERVICE_NAME = "vidscribe-newsletter"
       LOG_LEVEL               = "INFO"
+      # Gmail SMTP configuration - passed directly to avoid SSM reads
+      USE_GMAIL_SMTP          = var.use_gmail_smtp ? "true" : "false"
+      GMAIL_SENDER            = var.gmail_sender
+      GMAIL_APP_PASSWORD      = var.gmail_app_password
     }
   }
 

@@ -124,3 +124,146 @@ resource "aws_ssm_parameter" "llm_api_key" {
     ignore_changes = [value]
   }
 }
+
+# -----------------------------------------------------------------------------
+# Webshare Proxy Credentials (Optional)
+# Used by Processor Lambda to avoid YouTube IP blocking
+# -----------------------------------------------------------------------------
+
+resource "aws_ssm_parameter" "webshare_username" {
+  name        = "${local.ssm_prefix}/webshare_username"
+  description = "Webshare proxy username for YouTube transcript downloads"
+  type        = "String"
+  value       = var.webshare_username != "" ? var.webshare_username : "PLACEHOLDER"
+  tier        = "Standard"
+
+  tags = {
+    Name = "Webshare Username"
+  }
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
+resource "aws_ssm_parameter" "webshare_password" {
+  name        = "${local.ssm_prefix}/webshare_password"
+  description = "Webshare proxy password for YouTube transcript downloads"
+  type        = "SecureString"
+  value       = var.webshare_password != "" ? var.webshare_password : "PLACEHOLDER"
+  tier        = "Standard"
+
+  tags = {
+    Name = "Webshare Password"
+  }
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
+# -----------------------------------------------------------------------------
+# Gmail SMTP Configuration (Optional - Alternative to SES)
+# Used by Newsletter Lambda when use_gmail_smtp is true
+# -----------------------------------------------------------------------------
+
+resource "aws_ssm_parameter" "use_gmail_smtp" {
+  name        = "${local.ssm_prefix}/use_gmail_smtp"
+  description = "Set to 'true' to use Gmail SMTP instead of AWS SES"
+  type        = "String"
+  value       = var.use_gmail_smtp ? "true" : "false"
+  tier        = "Standard"
+
+  tags = {
+    Name = "Use Gmail SMTP Flag"
+  }
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
+resource "aws_ssm_parameter" "gmail_sender" {
+  name        = "${local.ssm_prefix}/gmail_sender"
+  description = "Gmail address to send from (e.g. user@gmail.com)"
+  type        = "String"
+  value       = var.gmail_sender != "" ? var.gmail_sender : "PLACEHOLDER"
+  tier        = "Standard"
+
+  tags = {
+    Name = "Gmail Sender"
+  }
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
+resource "aws_ssm_parameter" "gmail_app_password" {
+  name        = "${local.ssm_prefix}/gmail_app_password"
+  description = "Gmail App Password for SMTP authentication"
+  type        = "SecureString"
+  value       = var.gmail_app_password != "" ? var.gmail_app_password : "PLACEHOLDER"
+  tier        = "Standard"
+
+  tags = {
+    Name = "Gmail App Password"
+  }
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
+# -----------------------------------------------------------------------------
+# Generic Proxy Configuration (Optional - Alternative to Webshare)
+# Allows using any HTTP/HTTPS/SOCKS proxy provider
+# -----------------------------------------------------------------------------
+
+resource "aws_ssm_parameter" "proxy_type" {
+  name        = "${local.ssm_prefix}/proxy_type"
+  description = "Proxy type: 'webshare', 'generic', or 'none'"
+  type        = "String"
+  value       = var.proxy_type
+  tier        = "Standard"
+
+  tags = {
+    Name = "Proxy Type"
+  }
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
+resource "aws_ssm_parameter" "generic_proxy_http_url" {
+  name        = "${local.ssm_prefix}/generic_proxy_http_url"
+  description = "HTTP proxy URL (format: http://user:pass@host:port)"
+  type        = "SecureString"
+  value       = var.generic_proxy_http_url != "" ? var.generic_proxy_http_url : "PLACEHOLDER"
+  tier        = "Standard"
+
+  tags = {
+    Name = "Generic Proxy HTTP URL"
+  }
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
+resource "aws_ssm_parameter" "generic_proxy_https_url" {
+  name        = "${local.ssm_prefix}/generic_proxy_https_url"
+  description = "HTTPS proxy URL (format: https://user:pass@host:port)"
+  type        = "SecureString"
+  value       = var.generic_proxy_https_url != "" ? var.generic_proxy_https_url : "PLACEHOLDER"
+  tier        = "Standard"
+
+  tags = {
+    Name = "Generic Proxy HTTPS URL"
+  }
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
