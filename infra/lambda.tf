@@ -188,3 +188,45 @@ resource "aws_lambda_function" "newsletter" {
     Function = "newsletter"
   }
 }
+
+# -----------------------------------------------------------------------------
+# Cleanup Lambda Function
+# Triggered by EventBridge monthly to clean up permanently failed records
+# -----------------------------------------------------------------------------
+
+data "archive_file" "cleanup" {
+  type        = "zip"
+  source_dir  = "${path.root}/../src/cleanup"
+  output_path = "${path.root}/../packages/cleanup.zip"
+  excludes    = ["__pycache__", "*.pyc"]
+}
+
+resource "aws_lambda_function" "cleanup" {
+  function_name = local.lambda_cleanup_name
+  description   = "Monthly cleanup of permanently failed records from DynamoDB"
+
+  filename         = data.archive_file.cleanup.output_path
+  source_code_hash = data.archive_file.cleanup.output_base64sha256
+  handler          = "handler.lambda_handler"
+  runtime          = var.lambda_runtime
+
+  role        = aws_iam_role.cleanup.arn
+  timeout     = 120
+  memory_size = 256
+
+  environment {
+    variables = {
+      DYNAMODB_TABLE_NAME     = aws_dynamodb_table.videos.name
+      CLEANUP_AGE_DAYS        = "30"
+      POWERTOOLS_SERVICE_NAME = "vidscribe-cleanup"
+      LOG_LEVEL               = "INFO"
+    }
+  }
+
+  depends_on = [aws_cloudwatch_log_group.cleanup]
+
+  tags = {
+    Name     = "Cleanup Lambda"
+    Function = "cleanup"
+  }
+}

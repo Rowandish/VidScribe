@@ -178,3 +178,51 @@ resource "aws_cloudwatch_metric_alarm" "dlq_messages" {
     Name = "DLQ Messages Alarm"
   }
 }
+
+# -----------------------------------------------------------------------------
+# Cleanup Lambda Monitoring
+# -----------------------------------------------------------------------------
+
+resource "aws_cloudwatch_log_group" "cleanup" {
+  name              = "/aws/lambda/${local.lambda_cleanup_name}"
+  retention_in_days = var.log_retention_days
+
+  tags = {
+    Name     = "Cleanup Lambda Logs"
+    Function = "cleanup"
+  }
+}
+
+resource "aws_cloudwatch_log_metric_filter" "cleanup_errors" {
+  name           = "${local.lambda_cleanup_name}-errors"
+  pattern        = "ERROR"
+  log_group_name = aws_cloudwatch_log_group.cleanup.name
+
+  metric_transformation {
+    name          = "CleanupErrors"
+    namespace     = "VidScribe"
+    value         = "1"
+    default_value = "0"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "cleanup_errors" {
+  alarm_name          = "${local.lambda_cleanup_name}-error-alarm"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "CleanupErrors"
+  namespace           = "VidScribe"
+  period              = 300 # 5 minutes
+  statistic           = "Sum"
+  threshold           = 0
+  alarm_description   = "Triggered when the Cleanup Lambda logs an error"
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+
+  tags = {
+    Name     = "Cleanup Error Alarm"
+    Function = "cleanup"
+  }
+}

@@ -74,6 +74,7 @@ data "aws_iam_policy_document" "poller" {
       "dynamodb:PutItem",
       "dynamodb:UpdateItem",
       "dynamodb:Query",
+      "dynamodb:Scan",
       "dynamodb:BatchWriteItem"
     ]
     resources = [
@@ -249,4 +250,53 @@ resource "aws_iam_role_policy" "newsletter" {
   name   = "${local.lambda_newsletter_name}-policy"
   role   = aws_iam_role.newsletter.id
   policy = data.aws_iam_policy_document.newsletter.json
+}
+
+# =============================================================================
+# CLEANUP LAMBDA IAM
+# =============================================================================
+
+resource "aws_iam_role" "cleanup" {
+  name               = "${local.lambda_cleanup_name}-role"
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+
+  tags = {
+    Name = "Cleanup Lambda Role"
+  }
+}
+
+data "aws_iam_policy_document" "cleanup" {
+  # CloudWatch Logs - write logs
+  statement {
+    sid    = "CloudWatchLogs"
+    effect = "Allow"
+    actions = [
+      "logs:CreateLogStream",
+      "logs:PutLogEvents"
+    ]
+    resources = [
+      "${aws_cloudwatch_log_group.cleanup.arn}:*"
+    ]
+  }
+
+  # DynamoDB - scan and delete permanently failed records
+  statement {
+    sid    = "DynamoDBCleanup"
+    effect = "Allow"
+    actions = [
+      "dynamodb:Scan",
+      "dynamodb:DeleteItem",
+      "dynamodb:GetItem"
+    ]
+    resources = [
+      aws_dynamodb_table.videos.arn,
+      "${aws_dynamodb_table.videos.arn}/index/*"
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "cleanup" {
+  name   = "${local.lambda_cleanup_name}-policy"
+  role   = aws_iam_role.cleanup.id
+  policy = data.aws_iam_policy_document.cleanup.json
 }

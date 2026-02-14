@@ -18,6 +18,7 @@ locals {
   lambda_poller_name     = "${local.name_prefix}-poller"
   lambda_processor_name  = "${local.name_prefix}-processor"
   lambda_newsletter_name = "${local.name_prefix}-newsletter"
+  lambda_cleanup_name    = "${local.name_prefix}-cleanup"
 
   # SQS visibility timeout should be 6x the processor Lambda timeout
   sqs_visibility_timeout = var.processor_timeout * 6

@@ -63,3 +63,33 @@ resource "aws_lambda_permission" "newsletter_eventbridge" {
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.newsletter_schedule.arn
 }
+
+# -----------------------------------------------------------------------------
+# Cleanup Schedule (1st of each month at 03:00 UTC)
+# Removes permanently failed records from DynamoDB
+# -----------------------------------------------------------------------------
+
+resource "aws_cloudwatch_event_rule" "cleanup_schedule" {
+  name                = "${local.lambda_cleanup_name}-schedule"
+  description         = "Triggers the Cleanup Lambda on the 1st of each month at 03:00 UTC"
+  schedule_expression = "cron(0 3 1 * ? *)"
+
+  tags = {
+    Name     = "Cleanup Schedule"
+    Function = "cleanup"
+  }
+}
+
+resource "aws_cloudwatch_event_target" "cleanup" {
+  rule      = aws_cloudwatch_event_rule.cleanup_schedule.name
+  target_id = "CleanupLambda"
+  arn       = aws_lambda_function.cleanup.arn
+}
+
+resource "aws_lambda_permission" "cleanup_eventbridge" {
+  statement_id  = "AllowEventBridgeInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.cleanup.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.cleanup_schedule.arn
+}

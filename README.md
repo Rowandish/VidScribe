@@ -132,9 +132,11 @@ Observability & alerts
 **Key Features:**
 - 🔒 **Security**: Least privilege IAM, encrypted secrets in SSM
 - 💰 **Cost**: 100% Free Tier compatible
-- 🛡️ **Resilience**: SQS with DLQ, automatic retries
+- 🛡️ **Resilience**: SQS with DLQ, automatic retries, NO_TRANSCRIPT retry logic (3 attempts over 5 days)
+- 🧹 **Maintenance**: Monthly automated cleanup of permanently failed records
 - 📊 **Monitoring**: CloudWatch alarms, SNS notifications
 - 🚀 **CI/CD**: Automated deployment via GitHub Actions
+- 🛠️ **Management**: Unified CLI tool for channels, newsletter, errors, logs, and more
 
 ---
 
@@ -401,7 +403,7 @@ aws sqs get-queue-attributes \
 # View CloudWatch logs
 aws logs tail /aws/lambda/vidscribe-prod-poller --follow
 
-# Manual Video Processing (Unified Script)
+# Manual Video Processing
 # Windows:
 .\scripts\vidscribe.ps1 -Urls "https://youtube.com/watch?v=jH9BCOpL_bY"
 # Linux/Mac:
@@ -416,7 +418,91 @@ aws logs tail /aws/lambda/vidscribe-prod-poller --follow
 
 ---
 
-## 🛠️ Troubleshooting
+## 🛠️ Management Tool
+
+VidScribe includes a unified management tool for all operations. Available as both **PowerShell** and **Bash** scripts.
+
+### Quick Start
+
+```powershell
+# PowerShell (Windows)
+.\scripts\manage.ps1 help
+
+# Bash (Linux/Mac)
+./scripts/manage.sh help
+```
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `channels list` | List monitored channels with resolved names |
+| `channels add <ID>` | Add a YouTube channel |
+| `channels remove <ID>` | Remove a channel |
+| `channels clear` | Remove all channels |
+| `newsletter frequency <f>` | Set newsletter schedule (`daily`, `weekly`, `monthly`) |
+| `newsletter test [URL]` | Send a test newsletter |
+| `errors` | Show failed videos, DLQ depth, and Lambda errors |
+| `logs <function>` | Tail CloudWatch logs (`poller`, `processor`, `newsletter`, `cleanup`) |
+| `apikeys update` | Interactive API key update wizard |
+| `info` | Full system status dashboard |
+| `cleanup run` | Manually trigger DynamoDB cleanup |
+| `cleanup status` | Show permanently failed record count |
+| `retry list` | Show videos awaiting transcript retry |
+
+### Examples
+
+```powershell
+# Add a channel
+.\scripts\manage.ps1 channels add "UCBcRF18a7Qf58cCRy5xuWwQ"
+
+# Change newsletter to daily
+.\scripts\manage.ps1 newsletter frequency daily
+
+# View processor logs (last 100 lines)
+.\scripts\manage.ps1 logs processor -Lines 100
+
+# Check system health
+.\scripts\manage.ps1 errors -DaysBack 14
+
+# View full system info
+.\scripts\manage.ps1 info
+```
+
+### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-Lines` / `--lines` | 50 | Number of log lines to show |
+| `-DaysBack` / `--days-back` | 7 | Days to look back for errors |
+| `-ProjectName` / `--project` | vidscribe | Project name prefix |
+| `-Stage` / `--stage` | prod | Deployment stage |
+
+---
+
+## 🔄 NO_TRANSCRIPT Retry Logic
+
+When a video fails with `NO_TRANSCRIPT`, VidScribe automatically retries up to **3 times** over **5 days**:
+
+| Attempt | Day | Action |
+|---------|-----|--------|
+| 1 | Day 1 | First transcript download attempt |
+| 2 | Day 3 | Automatic retry via Poller |
+| 3 | Day 5 | Final retry attempt |
+
+If all 3 attempts fail, the video is marked as `PERMANENTLY_FAILED` with reason `NO_TRANSCRIPT_EXHAUSTED`.
+
+### Monthly Cleanup
+
+A dedicated **Cleanup Lambda** runs on the 1st of each month to delete `PERMANENTLY_FAILED` records older than 30 days. You can also trigger it manually:
+
+```powershell
+.\scripts\manage.ps1 cleanup run
+```
+
+---
+
+## 🔧 Troubleshooting
 
 ### Common Issues
 
@@ -482,14 +568,21 @@ VidScribe/
 │   ├── ssm.tf                # Config/secrets
 │   └── variables.tf          # Input variables
 ├── src/
-│   ├── poller/               # YouTube polling Lambda
-│   ├── processor/            # Transcript + LLM Lambda
-│   └── newsletter/           # Email newsletter Lambda
+│   ├── poller/               # YouTube polling + retry requeue Lambda
+│   ├── processor/            # Transcript + LLM Lambda (with retry logic)
+│   ├── newsletter/           # Email newsletter Lambda
+│   └── cleanup/              # Monthly DynamoDB cleanup Lambda
 ├── scripts/
-│   ├── setup.sh              # Bootstrap automation (Linux/Mac)
+│   ├── manage.ps1            # 🛠️ Unified management tool (PowerShell)
+│   ├── manage.sh             # 🛠️ Unified management tool (Bash)
+│   ├── vidscribe.ps1         # Video processing workflow (PowerShell)
+│   ├── vidscribe.sh          # Video processing workflow (Bash)
+│   ├── monitor_errors.ps1    # Error monitoring (PowerShell)
+│   ├── monitor_errors.sh     # Error monitoring (Bash)
 │   ├── setup.ps1             # Bootstrap automation (Windows)
-│   ├── build_layers.sh       # Lambda layer builder (Linux/Mac)
-│   └── build_layers.ps1      # Lambda layer builder (Windows)
+│   ├── setup.sh              # Bootstrap automation (Linux/Mac)
+│   ├── build_layers.ps1      # Lambda layer builder (Windows)
+│   └── build_layers.sh       # Lambda layer builder (Linux/Mac)
 ├── tests/                    # Pytest unit tests
 ├── .github/workflows/        # CI/CD pipeline
 └── README.md                 # This file

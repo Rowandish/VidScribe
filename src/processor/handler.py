@@ -54,6 +54,11 @@ SSM_LLM_API_KEY = os.environ.get("SSM_LLM_API_KEY", "/vidscribe/llm_api_key")
 TTL_DAYS = int(os.environ.get("TTL_DAYS", "30"))
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
 
+# Retry configuration for NO_TRANSCRIPT failures
+# Retry schedule: attempt 1 (day 1), attempt 2 (day 3), attempt 3 (day 5)
+MAX_TRANSCRIPT_RETRIES = 3
+RETRY_SCHEDULE_DAYS = [0, 2, 2]  # days to wait after each attempt
+
 # Proxy configuration
 # PROXY_TYPE: 'webshare', 'generic', or 'none'
 PROXY_TYPE = os.environ.get("PROXY_TYPE", "none").lower()
@@ -234,76 +239,7 @@ def get_transcript(video_id: str) -> Optional[str]:
         logger.error(f"Error getting transcript for video {video_id}: {e}")
         return None
 
-    """
-    Download the transcript for a YouTube video using youtube-transcript-api (new API).
 
-    Attempts to get transcripts in order of preference:
-    1. Manually created English transcript
-    2. Auto-generated English transcript
-    3. Any available transcript (auto-translated to English)
-
-    Args:
-        video_id: The YouTube video ID
-
-    Returns:
-        The transcript text, or None if unavailable
-    """
-    if YouTubeTranscriptApi is None:
-        logger.error("youtube-transcript-api not available")
-        return None
-
-    try:
-        # New API uses an instance with .list() / .fetch()
-        ytt_api = YouTubeTranscriptApi()
-
-        # List available transcripts for this video
-        transcript_list = ytt_api.list(video_id)
-
-        # Priority: manual English > auto English > translated to English
-        transcript = None
-
-        try:
-            # Try manually created English transcript first
-            transcript = transcript_list.find_manually_created_transcript(["en", "en-US", "en-GB"])
-        except NoTranscriptFound:
-            try:
-                # Try auto-generated English
-                transcript = transcript_list.find_generated_transcript(["en", "en-US", "en-GB"])
-            except NoTranscriptFound:
-                # Get any available transcript and translate to English
-                try:
-                    for t in transcript_list:
-                        transcript = t.translate("en")
-                        break
-                except Exception as e:
-                    logger.warning(f"Could not translate transcript: {e}")
-
-        if transcript is None:
-            logger.warning(f"No usable transcript found for video {video_id}")
-            return None
-
-        # Fetch transcript (new API returns objects with a .text attribute)
-        transcript_snippets = transcript.fetch()
-        full_text = " ".join([s.text for s in transcript_snippets])
-
-        # Truncate if too long (to stay within LLM context limits)
-        max_chars = 30000  # ~7500 tokens for most models
-        if len(full_text) > max_chars:
-            logger.info(f"Truncating transcript from {len(full_text)} to {max_chars} chars")
-            full_text = full_text[:max_chars] + "... [transcript truncated]"
-
-        logger.info(f"Successfully retrieved transcript for video {video_id} ({len(full_text)} chars)")
-        return full_text
-
-    except TranscriptsDisabled:
-        logger.warning(f"Transcripts are disabled for video {video_id}")
-        return None
-    except VideoUnavailable:
-        logger.warning(f"Video {video_id} is unavailable")
-        return None
-    except Exception as e:
-        logger.error(f"Error getting transcript for video {video_id}: {e}")
-        return None
 
 def summarize_with_gemini(transcript: str, title: str, channel: str, 
                           api_key: str, model: str, language: str) -> Optional[str]:
@@ -540,9 +476,42 @@ def save_summary(table, video: dict, summary: str) -> bool:
         return False
 
 
+def get_retry_state(table, video_id: str) -> dict:
+    """
+    Get the current retry state for a video from DynamoDB.
+
+    Returns:
+        Dict with retry_count, first_failed_at, failure_reason, or empty dict if not found.
+    """
+    try:
+        response = table.get_item(
+            Key={
+                "pk": f"VIDEO#{video_id}",
+                "sk": "METADATA"
+            },
+            ProjectionExpression="retry_count, first_failed_at, failure_reason, #s",
+            ExpressionAttributeNames={"#s": "status"}
+        )
+        item = response.get("Item", {})
+        return {
+            "retry_count": int(item.get("retry_count", 0)),
+            "first_failed_at": item.get("first_failed_at", ""),
+            "failure_reason": item.get("failure_reason", ""),
+            "status": item.get("status", "")
+        }
+    except ClientError as e:
+        logger.error(f"Error getting retry state for video {video_id}: {e}")
+        return {}
+
+
 def mark_video_failed(table, video_id: str, error: str, failure_reason: str = "FAILED") -> None:
     """
     Mark a video as failed in DynamoDB.
+
+    For NO_TRANSCRIPT failures, implements a retry mechanism:
+    - Up to MAX_TRANSCRIPT_RETRIES attempts (3)
+    - Retry schedule: day 1, day 3, day 5
+    - After exhausting retries: PERMANENTLY_FAILED / NO_TRANSCRIPT_EXHAUSTED
 
     failure_reason examples:
       - YOUTUBE_BLOCKED
@@ -551,24 +520,95 @@ def mark_video_failed(table, video_id: str, error: str, failure_reason: str = "F
       - VIDEO_UNAVAILABLE
       - UNKNOWN
     """
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+
     try:
-        table.update_item(
-            Key={
-                "pk": f"VIDEO#{video_id}",
-                "sk": "METADATA"
-            },
-            UpdateExpression="SET #status = :status, #error = :error, failure_reason = :reason, failed_at = :failed_at",
-            ExpressionAttributeNames={
-                "#status": "status",
-                "#error": "error"  # 'error' is a reserved keyword in DynamoDB
-            },
-            ExpressionAttributeValues={
-                ":status": "FAILED",
-                ":error": error[:500],
-                ":reason": failure_reason[:100],
-                ":failed_at": datetime.now(timezone.utc).isoformat()
-            }
-        )
+        if failure_reason == "NO_TRANSCRIPT":
+            # Get current retry state
+            state = get_retry_state(table, video_id)
+            current_retry = state.get("retry_count", 0)
+            first_failed = state.get("first_failed_at", "") or now_iso
+
+            new_retry_count = current_retry + 1
+
+            if new_retry_count >= MAX_TRANSCRIPT_RETRIES:
+                # Exhausted all retries → mark as permanently failed
+                logger.warning(
+                    f"Video {video_id} exhausted {MAX_TRANSCRIPT_RETRIES} transcript retries. "
+                    f"Marking as PERMANENTLY_FAILED."
+                )
+                table.update_item(
+                    Key={"pk": f"VIDEO#{video_id}", "sk": "METADATA"},
+                    UpdateExpression=(
+                        "SET #status = :status, #error = :error, "
+                        "failure_reason = :reason, failed_at = :failed_at, "
+                        "retry_count = :retry_count, first_failed_at = :first_failed"
+                    ),
+                    ExpressionAttributeNames={
+                        "#status": "status",
+                        "#error": "error"
+                    },
+                    ExpressionAttributeValues={
+                        ":status": "PERMANENTLY_FAILED",
+                        ":error": error[:500],
+                        ":reason": "NO_TRANSCRIPT_EXHAUSTED",
+                        ":failed_at": now_iso,
+                        ":retry_count": new_retry_count,
+                        ":first_failed": first_failed
+                    }
+                )
+            else:
+                # Schedule next retry
+                days_until_retry = RETRY_SCHEDULE_DAYS[min(new_retry_count, len(RETRY_SCHEDULE_DAYS) - 1)]
+                next_retry = now + timedelta(days=days_until_retry)
+                next_retry_iso = next_retry.isoformat()
+
+                logger.info(
+                    f"Video {video_id} NO_TRANSCRIPT attempt {new_retry_count}/{MAX_TRANSCRIPT_RETRIES}. "
+                    f"Next retry at {next_retry_iso}"
+                )
+                table.update_item(
+                    Key={"pk": f"VIDEO#{video_id}", "sk": "METADATA"},
+                    UpdateExpression=(
+                        "SET #status = :status, #error = :error, "
+                        "failure_reason = :reason, failed_at = :failed_at, "
+                        "retry_count = :retry_count, first_failed_at = :first_failed, "
+                        "next_retry_at = :next_retry"
+                    ),
+                    ExpressionAttributeNames={
+                        "#status": "status",
+                        "#error": "error"
+                    },
+                    ExpressionAttributeValues={
+                        ":status": "FAILED",
+                        ":error": error[:500],
+                        ":reason": "NO_TRANSCRIPT",
+                        ":failed_at": now_iso,
+                        ":retry_count": new_retry_count,
+                        ":first_failed": first_failed,
+                        ":next_retry": next_retry_iso
+                    }
+                )
+        else:
+            # Non-retryable failure — mark immediately
+            table.update_item(
+                Key={"pk": f"VIDEO#{video_id}", "sk": "METADATA"},
+                UpdateExpression=(
+                    "SET #status = :status, #error = :error, "
+                    "failure_reason = :reason, failed_at = :failed_at"
+                ),
+                ExpressionAttributeNames={
+                    "#status": "status",
+                    "#error": "error"
+                },
+                ExpressionAttributeValues={
+                    ":status": "FAILED",
+                    ":error": error[:500],
+                    ":reason": failure_reason[:100],
+                    ":failed_at": now_iso
+                }
+            )
     except ClientError as e:
         logger.error(f"Error marking video {video_id} as failed: {e}")
 

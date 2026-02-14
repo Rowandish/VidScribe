@@ -255,6 +255,80 @@ def send_to_sqs(video: dict) -> bool:
 
 
 # -----------------------------------------------------------------------------
+# Retry Logic for NO_TRANSCRIPT Failures
+# -----------------------------------------------------------------------------
+
+
+def requeue_retryable_videos(table) -> dict:
+    """
+    Scan DynamoDB for NO_TRANSCRIPT failures eligible for retry and re-queue them.
+
+    A video is eligible for retry if:
+    - status == "FAILED"
+    - failure_reason == "NO_TRANSCRIPT"
+    - next_retry_at <= now (retry window has passed)
+
+    Returns:
+        Dict with requeue statistics
+    """
+    stats = {"scanned": 0, "requeued": 0, "errors": 0}
+
+    try:
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        # Scan for retryable NO_TRANSCRIPT failures
+        response = table.scan(
+            FilterExpression=(
+                "#s = :status AND failure_reason = :reason AND next_retry_at <= :now"
+            ),
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={
+                ":status": "FAILED",
+                ":reason": "NO_TRANSCRIPT",
+                ":now": now_iso
+            },
+            ProjectionExpression="pk, video_id, title, channel_id, channel_title, published_at, retry_count"
+        )
+
+        items = response.get("Items", [])
+        stats["scanned"] = len(items)
+
+        if not items:
+            logger.info("No retryable NO_TRANSCRIPT videos found")
+            return stats
+
+        logger.info(f"Found {len(items)} retryable NO_TRANSCRIPT videos")
+
+        for item in items:
+            video_id = item.get("video_id", "")
+            retry_count = int(item.get("retry_count", 0))
+
+            video_data = {
+                "video_id": video_id,
+                "title": item.get("title", f"Retry: {video_id}"),
+                "channel_id": item.get("channel_id", "RETRY"),
+                "channel_title": item.get("channel_title", "Retry"),
+                "published_at": item.get("published_at", now_iso)
+            }
+
+            logger.info(
+                f"Re-queuing video {video_id} for transcript retry "
+                f"(attempt {retry_count + 1})"
+            )
+
+            if send_to_sqs(video_data):
+                stats["requeued"] += 1
+            else:
+                stats["errors"] += 1
+
+    except Exception as e:
+        logger.error(f"Error scanning for retryable videos: {e}")
+        stats["errors"] += 1
+
+    return stats
+
+
+# -----------------------------------------------------------------------------
 # Lambda Handler
 # -----------------------------------------------------------------------------
 
@@ -264,6 +338,7 @@ def lambda_handler(event: dict, context: Any) -> dict:
     Main Lambda handler function.
     
     Polls YouTube channels for new videos and queues them for processing.
+    Also re-queues retryable NO_TRANSCRIPT failures whose retry window has passed.
     
     Args:
         event: EventBridge event (or manual invocation payload)
@@ -281,7 +356,8 @@ def lambda_handler(event: dict, context: Any) -> dict:
         "videos_found": 0,
         "videos_queued": 0,
         "videos_skipped": 0,
-        "errors": 0
+        "errors": 0,
+        "retries_requeued": 0
     }
     
     try:
@@ -341,6 +417,12 @@ def lambda_handler(event: dict, context: Any) -> dict:
             except Exception as e:
                 logger.error(f"Error processing channel {channel_id}: {e}")
                 stats["errors"] += 1
+
+        # Re-queue retryable NO_TRANSCRIPT failures
+        retry_stats = requeue_retryable_videos(table)
+        stats["retries_requeued"] = retry_stats.get("requeued", 0)
+        if retry_stats.get("errors", 0) > 0:
+            stats["errors"] += retry_stats["errors"]
         
         logger.info(f"Poller execution complete: {json.dumps(stats)}")
         
@@ -361,3 +443,4 @@ def lambda_handler(event: dict, context: Any) -> dict:
                 "stats": stats
             })
         }
+
