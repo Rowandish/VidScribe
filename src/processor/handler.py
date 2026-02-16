@@ -57,7 +57,7 @@ LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
 # Retry configuration for NO_TRANSCRIPT failures
 # Retry schedule: attempt 1 (day 1), attempt 2 (day 3), attempt 3 (day 5)
 MAX_TRANSCRIPT_RETRIES = 3
-RETRY_SCHEDULE_DAYS = [0, 2, 2]  # days to wait after each attempt
+RETRY_SCHEDULE_DAYS = [1, 3, 5]  # days to wait after each attempt
 
 # Proxy configuration
 # PROXY_TYPE: 'webshare', 'generic', or 'none'
@@ -560,7 +560,7 @@ def mark_video_failed(table, video_id: str, error: str, failure_reason: str = "F
                 )
             else:
                 # Schedule next retry
-                days_until_retry = RETRY_SCHEDULE_DAYS[min(new_retry_count, len(RETRY_SCHEDULE_DAYS) - 1)]
+                days_until_retry = RETRY_SCHEDULE_DAYS[min(new_retry_count - 1, len(RETRY_SCHEDULE_DAYS) - 1)]
                 next_retry = now + timedelta(days=days_until_retry)
                 next_retry_iso = next_retry.isoformat()
 

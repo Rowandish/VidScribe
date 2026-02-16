@@ -42,7 +42,8 @@ class TestRetryLogic:
 
         # Call mark_video_failed
         now_utc = datetime.now(timezone.utc)
-        mark_video_failed(table, video_id, "NO_TRANSCRIPT", "No transcript available")
+        # FIXED: Argument order in test was wrong (error, failure_reason)
+        mark_video_failed(table, video_id, "No transcript available", failure_reason="NO_TRANSCRIPT")
 
         # Verify state
         item = table.get_item(Key={"pk": f"VIDEO#{video_id}", "sk": "METADATA"})["Item"]
@@ -56,11 +57,11 @@ class TestRetryLogic:
 
         # Check next_retry_at is scheduled correctly (Day 1 retry = +1 day from failed_at)
         # RETRY_SCHEDULE_DAYS = [1, 3, 5]
-        # retry_count was 0, now became 1. Scheduling for attempt 1 (index 0 in array? No.)
+        # retry_count was 0, now became 1. Scheduling for attempt 1 (index 0 in array)
         # Logic in handler:
         #   current_retry_count = item.get('retry_count', 0)
         #   new_retry_count = current_retry_count + 1
-        #   days_wait = RETRY_SCHEDULE_DAYS[current_retry_count]  (index 0 -> 1 day)
+        #   days_wait = RETRY_SCHEDULE_DAYS[new_retry_count - 1] -> index 0 -> 1 day
         next_retry = datetime.fromisoformat(item["next_retry_at"])
         wait_seconds = (next_retry - first_failed).total_seconds()
         
@@ -93,7 +94,7 @@ class TestRetryLogic:
             "first_failed_at": "2026-01-01T00:00:00+00:00"
         })
 
-        mark_video_failed(table, video_id, "NO_TRANSCRIPT", "Still no transcript")
+        mark_video_failed(table, video_id, "Still no transcript", failure_reason="NO_TRANSCRIPT")
 
         item = table.get_item(Key={"pk": f"VIDEO#{video_id}", "sk": "METADATA"})["Item"]
         assert item["status"] == "PERMANENTLY_FAILED"
@@ -149,9 +150,11 @@ class TestRetryLogic:
             "next_retry_at": past_time 
         })
 
-        requeued_count = requeue_retryable_videos(table, queue)
+        # Patch the global SQS_QUEUE_URL in the handler to match our moto queue
+        with patch("src.poller.handler.SQS_QUEUE_URL", queue.url):
+             stats = requeue_retryable_videos(table)
 
-        assert requeued_count == 1
+        assert stats["requeued"] == 1
         
         # Verify message in SQS
         messages = queue.receive_messages()

@@ -317,7 +317,18 @@ def requeue_retryable_videos(table) -> dict:
             )
 
             if send_to_sqs(video_data):
-                stats["requeued"] += 1
+                # Update status to QUEUED to prevent re-processing until handled
+                try:
+                    table.update_item(
+                        Key={"pk": f"VIDEO#{video_id}", "sk": "METADATA"},
+                        UpdateExpression="SET #s = :status",
+                        ExpressionAttributeNames={"#s": "status"},
+                        ExpressionAttributeValues={":status": "QUEUED"}
+                    )
+                    stats["requeued"] += 1
+                except Exception as e:
+                    logger.error(f"Failed to update status for requeued video {video_id}: {e}")
+                    stats["errors"] += 1
             else:
                 stats["errors"] += 1
 
