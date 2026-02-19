@@ -135,8 +135,7 @@ Observability & alerts
 - 🛡️ **Resilience**: SQS with DLQ, automatic retries, NO_TRANSCRIPT retry logic (3 attempts over 5 days)
 - 🧹 **Maintenance**: Monthly automated cleanup of permanently failed records
 - 📊 **Monitoring**: CloudWatch alarms, SNS notifications
-- 🚀 **CI/CD**: Automated deployment via GitHub Actions
-- 🛠️ **Management**: Unified CLI tool for channels, newsletter, errors, logs, and more
+- 🛠️ **Management**: Unified CLI tool for channels, video processing, newsletter, errors, logs, and system health checks
 
 ---
 
@@ -164,16 +163,15 @@ Before you begin, ensure you have:
 
 ### 🖥️ Windows vs Linux/Mac
 
-This project supports both **Windows (PowerShell)** and **Linux/Mac (Bash)** for local development:
+This project supports both **Windows (PowerShell)** and **Linux/Mac (Bash)**:
 
-| Files | Windows | Linux/Mac/CI |
-|-------|---------|-------------|
+| Tool | Windows | Linux/Mac |
+|------|---------|----------|
+| Management tool | `scripts/manage.ps1` | `scripts/manage.sh` |
 | Setup script | `scripts/setup.ps1` | `scripts/setup.sh` |
 | Layer builder | `scripts/build_layers.ps1` | `scripts/build_layers.sh` |
 
 **Windows users**: Add `use_windows_scripts = true` to your `terraform.tfvars` to use PowerShell scripts during Terraform operations.
-
-**GitHub Actions**: Always uses Bash (Ubuntu), so no configuration needed for CI/CD.
 
 ---
 
@@ -207,59 +205,29 @@ cd ../  # Back to infra/
 cp terraform.tfvars.example terraform.tfvars
 ```
 
-Edit `terraform.tfvars`:
+Edit `terraform.tfvars` with basic infrastructure settings:
 
 ```hcl
 # WINDOWS USERS: Uncomment the next line to use PowerShell scripts
 # use_windows_scripts = true
 
-# Required: Email Configuration
+# Email Configuration (initial seeding)
 sender_email      = "your-verified-email@example.com"
 destination_email = "recipient@example.com"
-admin_email       = "admin@example.com"
 
-# Required: YouTube Channels to Monitor
-youtube_channels = "[\"CHANNEL_ID_1\", \"CHANNEL_ID_2\"]"
+# YouTube Channels (initial seeding)
+youtube_channels = ["CHANNEL_ID_1", "CHANNEL_ID_2"]
 
-# LLM Configuration (choose one)
+# LLM Configuration (initial seeding)
 llm_provider = "gemini"  # or "groq"
-llm_model    = "gemini-flash-latest"  # or "llama-3.1-70b-versatile"
+llm_model    = "gemini-1.5-flash"
 summarization_language = "Italian"
-
-# Optional: Residential Proxy (Recommended)
-# webshare_username = "..."
-# webshare_password = "..."
-
-# Optional: Gmail SMTP (instead of SES)
-# use_gmail_smtp     = true
-# gmail_sender       = "user@gmail.com"
-# gmail_app_password = "xxxx xxxx xxxx xxxx"
 ```
 
-> [!TIP]
-> **GitHub Actions Users**: Since `terraform.tfvars` is not committed to Git, you should set your preferred language as a **Repository Variable** in GitHub (Settings -> Secrets and variables -> Actions -> Variables) with the name `SUMMARIZATION_LANGUAGE`.
+> [!NOTE]
+> After initial deployment, use `manage.ps1` / `manage.sh` to update all runtime configuration. Terraform is configured to ignore changes to SSM parameters after creation.
 
-### Step 4: Set API Keys
-
-**Linux/Mac (Bash):**
-```bash
-export TF_VAR_youtube_api_key="YOUR_YOUTUBE_API_KEY"
-export TF_VAR_llm_api_key="YOUR_GEMINI_OR_GROQ_API_KEY"
-export TF_VAR_webshare_username="YOUR_WEBSHARE_USERNAME"
-export TF_VAR_webshare_password="YOUR_WEBSHARE_PASSWORD"
-```
-
-**Windows (PowerShell):**
-```powershell
-$env:TF_VAR_youtube_api_key="YOUR_YOUTUBE_API_KEY"
-$env:TF_VAR_llm_api_key="YOUR_GEMINI_OR_GROQ_API_KEY"
-$env:TF_VAR_webshare_username="YOUR_WEBSHARE_USERNAME"
-$env:TF_VAR_webshare_password="YOUR_WEBSHARE_PASSWORD"
-```
-
-> **Note:** Webshare credentials are **never** stored in SSM. Provide them locally via the `TF_VAR_webshare_*` exports above and configure GitHub secrets named `WEBSHARE_USERNAME` and `WEBSHARE_PASSWORD` so Terraform can inject the values into Lambda without persisting them elsewhere.
-
-### Step 5: Deploy
+### Step 4: Deploy
 
 ```bash
 # Initialize Terraform with remote state
@@ -268,12 +236,28 @@ terraform init \
   -backend-config="dynamodb_table=vidscribe-terraform-lock" \
   -backend-config="region=eu-west-1"
 
-# Review the plan
-terraform plan
-
-# Deploy!
-terraform apply
+# Or use the management tool
+.\scripts\manage.ps1 deploy     # Windows
+./scripts/manage.sh deploy       # Linux/Mac
 ```
+
+### Step 5: Set API Keys & Secrets
+
+After deployment, configure API keys and secrets using the management tool:
+
+```powershell
+# Interactive API key wizard
+.\scripts\manage.ps1 apikeys
+
+# Configure email settings
+.\scripts\manage.ps1 email configure
+
+# Add YouTube channels
+.\scripts\manage.ps1 channels add "UCBcRF18a7Qf58cCRy5xuWwQ"
+```
+
+> [!IMPORTANT]
+> API keys and secrets are stored as **SecureString** in AWS SSM Parameter Store. They are never committed to code.
 
 ### Step 6: Verify Email Addresses
 
@@ -295,55 +279,24 @@ After deployment, check your email for verification links from AWS SES:
 
 ### Updating Configuration After Deployment
 
-You can update settings without redeploying:
+All runtime configuration is managed through the management tool — no redeployment needed:
 
-```bash
-# Update YouTube channels
-aws ssm put-parameter \
-  --name "/vidscribe/youtube_channels" \
-  --value '["UCnew123", "UCother456"]' \
-  --type String \
-  --overwrite
+```powershell
+# Update channels
+.\scripts\manage.ps1 channels add "UCnew123"
 
 # Update API keys
-aws ssm put-parameter \
-  --name "/vidscribe/youtube_api_key" \
-  --value "new-api-key" \
-  --type SecureString \
-  --overwrite
+.\scripts\manage.ps1 apikeys
+
+# Change email settings
+.\scripts\manage.ps1 email configure
+
+# Change newsletter frequency
+.\scripts\manage.ps1 newsletter frequency daily
+
+# System health check
+.\scripts\manage.ps1 info
 ```
-
----
-
-## 🔧 GitHub Actions Setup
-
-For automated deployments, configure the following secrets in your GitHub repository:
-
-| Secret | Description |
-|--------|-------------|
-| `AWS_ACCESS_KEY_ID` | AWS IAM access key |
-| `AWS_SECRET_ACCESS_KEY` | AWS IAM secret key |
-| `TF_STATE_BUCKET` | S3 bucket name for Terraform state |
-| `TF_LOCK_TABLE` | DynamoDB table name (usually `vidscribe-terraform-lock`) |
-| `TF_VAR_YOUTUBE_API_KEY` | YouTube Data API key |
-| `TF_VAR_LLM_API_KEY` | Gemini or Groq API key |
-| `WEBSHARE_USERNAME` | Webshare proxy username (optional) |
-| `WEBSHARE_PASSWORD` | Webshare proxy password (optional) |
-| `GENERIC_PROXY_HTTP_URL` | Alternative proxy HTTP URL (optional, format: `http://user:pass@host:port`) |
-| `GENERIC_PROXY_HTTPS_URL` | Alternative proxy HTTPS URL (optional) |
-| `GMAIL_APP_PASSWORD` | Gmail app password for SMTP (optional) |
-
-Repository variables:
-
-| Variable | Description |
-|----------|-------------|
-| `SENDER_EMAIL` | SES-verified sender email |
-| `DESTINATION_EMAIL` | Newsletter recipient email |
-| `ADMIN_EMAIL` | Error notification email |
-| `SUMMARIZATION_LANGUAGE` | Language for summaries (default: English) |
-| `PROXY_TYPE` | Proxy type: `webshare`, `generic`, or `none` |
-| `USE_GMAIL_SMTP` | Set to `true` to use Gmail instead of SES |
-| `GMAIL_SENDER` | Gmail address to send from |
 
 ---
 
@@ -403,17 +356,17 @@ aws sqs get-queue-attributes \
 # View CloudWatch logs
 aws logs tail /aws/lambda/vidscribe-prod-poller --follow
 
-# Manual Video Processing
+# Manual Video Processing (queue + process + newsletter)
 # Windows:
-.\scripts\vidscribe.ps1 -Urls "https://youtube.com/watch?v=jH9BCOpL_bY"
+.\scripts\manage.ps1 process "https://youtube.com/watch?v=jH9BCOpL_bY"
 # Linux/Mac:
-./scripts/vidscribe.sh "https://youtube.com/watch?v=jH9BCOpL_bY"
+./scripts/manage.sh process "https://youtube.com/watch?v=jH9BCOpL_bY"
 
-# Process multiple videos:
-.\scripts\vidscribe.ps1 -Urls "video1","video2" -SkipNewsletter
+# Insert test data + send newsletter:
+.\scripts\manage.ps1 newsletter test-insert
 
-# Test newsletter only:
-.\scripts\vidscribe.ps1 -TestNewsletter
+# Send newsletter with current data:
+.\scripts\manage.ps1 newsletter test
 ```
 
 ---
@@ -436,16 +389,21 @@ VidScribe includes a unified management tool for all operations. Available as bo
 
 | Command | Description |
 |---------|-------------|
+| `deploy` | Deploy infrastructure changes (Terraform) |
 | `channels list` | List monitored channels with resolved names |
 | `channels add <ID>` | Add a YouTube channel |
 | `channels remove <ID>` | Remove a channel |
 | `channels clear` | Remove all channels |
+| `process <URL> [URL2...]` | Process video(s): queue → monitor → newsletter |
 | `newsletter frequency <f>` | Set newsletter schedule (`daily`, `weekly`, `monthly`) |
-| `newsletter test [URL]` | Send a test newsletter |
+| `newsletter test` | Invoke newsletter Lambda (send with existing data) |
+| `newsletter test-insert` | Insert test summary + send newsletter |
 | `errors` | Show failed videos, DLQ depth, and Lambda errors |
 | `logs <function>` | Tail CloudWatch logs (`poller`, `processor`, `newsletter`, `cleanup`) |
-| `apikeys update` | Interactive API key update wizard |
-| `info` | Full system status dashboard |
+| `apikeys` | Interactive API key update wizard |
+| `email method <ses\|gmail>` | Switch email provider |
+| `email configure` | Configure email settings |
+| `info` | System status + health check dashboard |
 | `cleanup run` | Manually trigger DynamoDB cleanup |
 | `cleanup status` | Show permanently failed record count |
 | `retry list` | Show videos awaiting transcript retry |
@@ -456,17 +414,20 @@ VidScribe includes a unified management tool for all operations. Available as bo
 # Add a channel
 .\scripts\manage.ps1 channels add "UCBcRF18a7Qf58cCRy5xuWwQ"
 
+# Process a video end-to-end
+.\scripts\manage.ps1 process "https://youtube.com/watch?v=abc123"
+
 # Change newsletter to daily
 .\scripts\manage.ps1 newsletter frequency daily
 
+# Insert test data + send newsletter
+.\scripts\manage.ps1 newsletter test-insert
+
+# View full system health check
+.\scripts\manage.ps1 info
+
 # View processor logs (last 100 lines)
 .\scripts\manage.ps1 logs processor -Lines 100
-
-# Check system health
-.\scripts\manage.ps1 errors -DaysBack 14
-
-# View full system info
-.\scripts\manage.ps1 info
 ```
 
 ### Options
@@ -575,16 +536,11 @@ VidScribe/
 ├── scripts/
 │   ├── manage.ps1            # 🛠️ Unified management tool (PowerShell)
 │   ├── manage.sh             # 🛠️ Unified management tool (Bash)
-│   ├── vidscribe.ps1         # Video processing workflow (PowerShell)
-│   ├── vidscribe.sh          # Video processing workflow (Bash)
-│   ├── monitor_errors.ps1    # Error monitoring (PowerShell)
-│   ├── monitor_errors.sh     # Error monitoring (Bash)
 │   ├── setup.ps1             # Bootstrap automation (Windows)
 │   ├── setup.sh              # Bootstrap automation (Linux/Mac)
 │   ├── build_layers.ps1      # Lambda layer builder (Windows)
 │   └── build_layers.sh       # Lambda layer builder (Linux/Mac)
 ├── tests/                    # Pytest unit tests
-├── .github/workflows/        # CI/CD pipeline
 └── README.md                 # This file
 ```
 

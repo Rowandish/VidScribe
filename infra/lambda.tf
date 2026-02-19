@@ -118,12 +118,13 @@ resource "aws_lambda_function" "processor" {
       TTL_DAYS                = var.dynamodb_ttl_days
       POWERTOOLS_SERVICE_NAME = "vidscribe-processor"
       LOG_LEVEL               = "INFO"
-      # Proxy configuration - passed directly to avoid SSM reads
-      PROXY_TYPE              = var.proxy_type
-      WEBSHARE_USERNAME       = var.webshare_username
-      WEBSHARE_PASSWORD       = var.webshare_password
-      GENERIC_PROXY_HTTP_URL  = var.generic_proxy_http_url
-      GENERIC_PROXY_HTTPS_URL = var.generic_proxy_https_url
+      
+      # Proxy Configuration (SSM)
+      SSM_PROXY_TYPE              = aws_ssm_parameter.proxy_type.name
+      SSM_WEBSHARE_USERNAME       = aws_ssm_parameter.webshare_username.name
+      SSM_WEBSHARE_PASSWORD       = aws_ssm_parameter.webshare_password.name
+      SSM_GENERIC_PROXY_HTTP_URL  = aws_ssm_parameter.generic_proxy_http_url.name
+      SSM_GENERIC_PROXY_HTTPS_URL = aws_ssm_parameter.generic_proxy_https_url.name
     }
   }
 
@@ -174,10 +175,11 @@ resource "aws_lambda_function" "newsletter" {
       AWS_SES_REGION          = var.aws_region
       POWERTOOLS_SERVICE_NAME = "vidscribe-newsletter"
       LOG_LEVEL               = "INFO"
-      # Gmail SMTP configuration - passed directly to avoid SSM reads
-      USE_GMAIL_SMTP          = var.use_gmail_smtp ? "true" : "false"
-      GMAIL_SENDER            = var.gmail_sender
-      GMAIL_APP_PASSWORD      = var.gmail_app_password
+      
+      # Gmail Configuration (SSM)
+      SSM_USE_GMAIL_SMTP      = aws_ssm_parameter.use_gmail_smtp.name
+      SSM_GMAIL_SENDER        = aws_ssm_parameter.gmail_sender.name
+      SSM_GMAIL_APP_PASSWORD  = aws_ssm_parameter.gmail_app_password.name
     }
   }
 

@@ -175,6 +175,36 @@ get_channel_name() {
     echo "$title"
 }
 
+extract_video_id() {
+    local url="$1"
+    if [[ "$url" =~ ^[a-zA-Z0-9_-]{11}$ ]]; then
+        echo "$url"
+        return
+    fi
+    local vid
+    vid=$(echo "$url" | python3 -c "import sys,re; m=re.search(r'(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/|youtube\.com/v/)([a-zA-Z0-9_-]{11})', sys.stdin.read().strip()); print(m.group(1) if m else sys.stdin.read().strip())" 2>/dev/null)
+    echo "${vid:-$url}"
+}
+
+is_key_plausible() {
+    local val="$1"
+    [ -z "$val" ] && return 1
+    [ "$val" = "PLACEHOLDER_REPLACE_ME" ] && return 1
+    [ "$val" = "PLACEHOLDER" ] && return 1
+    [ ${#val} -lt 10 ] && return 1
+    return 0
+}
+
+is_email_plausible() {
+    local val="$1"
+    [ -z "$val" ] && return 1
+    [ "$val" = "PLACEHOLDER" ] && return 1
+    [ ${#val} -lt 5 ] && return 1
+    [[ "$val" == *@*.* ]] && return 0
+    return 1
+}
+
+
 # =============================================================================
 # Command: channels
 # =============================================================================
@@ -338,34 +368,97 @@ cmd_newsletter() {
         test)
             print_section "Send Test Newsletter" "📧"
 
-            if [ -n "$arg" ]; then
-                print_inf "Processing video and sending test newsletter..."
-                bash "$(dirname "$0")/vidscribe.sh" --test-newsletter "$arg"
-            else
-                print_inf "Invoking newsletter Lambda..."
-                local payload='{"source":"manual-test","detail-type":"Manual Test"}'
-                local tmp_file
-                tmp_file=$(mktemp)
-                aws lambda invoke \
-                    --function-name "$LAMBDA_NEWSLETTER" \
-                    --payload "$payload" \
-                    --cli-binary-format raw-in-base64-out \
-                    "$tmp_file" >/dev/null 2>&1
+            print_inf "Invoking newsletter Lambda..."
+            local payload='{"source":"manual-test","detail-type":"Manual Test"}'
+            local tmp_file
+            tmp_file=$(mktemp)
+            aws lambda invoke \
+                --function-name "$LAMBDA_NEWSLETTER" \
+                --payload "$payload" \
+                --cli-binary-format raw-in-base64-out \
+                "$tmp_file" >/dev/null 2>&1
 
-                if [ -f "$tmp_file" ]; then
-                    local status
-                    status=$(cat "$tmp_file" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('statusCode', 0))" 2>/dev/null || echo "0")
-                    rm -f "$tmp_file"
-                    if [ "$status" = "200" ]; then
-                        print_ok "Test newsletter sent successfully"
-                    else
-                        print_err "Newsletter invocation failed (status: $status)"
-                    fi
+            if [ -f "$tmp_file" ]; then
+                local status_code summaries recipient
+                status_code=$(cat "$tmp_file" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('statusCode', 0))" 2>/dev/null || echo "0")
+                if [ "$status_code" = "200" ]; then
+                    print_ok "Test newsletter sent successfully"
+                    summaries=$(cat "$tmp_file" | python3 -c "import sys,json; b=json.loads(json.load(sys.stdin)['body']); print(b.get('summaries_count','?'))" 2>/dev/null || echo "?")
+                    recipient=$(cat "$tmp_file" | python3 -c "import sys,json; b=json.loads(json.load(sys.stdin)['body']); print(b.get('recipient','?'))" 2>/dev/null || echo "?")
+                    print_row "Summaries" "$summaries" "$CYAN"
+                    print_row "Recipient" "$recipient" "$WHITE"
+                else
+                    print_err "Newsletter invocation failed (status: $status_code)"
                 fi
+                rm -f "$tmp_file"
             fi
             ;;
+        test-insert)
+            print_section "Insert Test Summary & Send Newsletter" "🧪"
+
+            local now video_id ttl
+            now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+            ttl=$(python3 -c "import time; print(int(time.time()) + 30*86400)")
+            video_id="test-$((RANDOM % 9000 + 1000))"
+
+            print_inf "Inserting test summary (ID: $video_id)..."
+
+            local item
+            item=$(python3 -c "
+import json
+item = {
+    'pk': {'S': 'SUMMARY#$video_id'},
+    'sk': {'S': 'DATA'},
+    'gsi1pk': {'S': 'SUMMARY'},
+    'gsi1sk': {'S': '$now'},
+    'video_id': {'S': '$video_id'},
+    'title': {'S': '🧪 Test Video - VidScribe Pipeline Test'},
+    'channel_title': {'S': 'VidScribe Test Channel'},
+    'summary': {'S': 'This is a test video to verify VidScribe works correctly.\n\n**Features tested:**\n- DynamoDB data insertion\n- Newsletter Lambda invocation\n- HTML email formatting\n- Send via SES or Gmail\n\nIf you receive this email, the system is operational! 🎉'},
+    'published_at': {'S': '$now'},
+    'summarized_at': {'S': '$now'},
+    'ttl': {'N': '$ttl'}
+}
+print(json.dumps(item))
+")
+
+            aws dynamodb put-item \
+                --table-name "$TABLE_NAME" \
+                --item "$item" \
+                --no-cli-pager >/dev/null 2>&1 || { print_err "Failed to insert test data"; return; }
+            print_ok "Test data inserted"
+
+            print_inf "Invoking newsletter Lambda..."
+            local tmp_file
+            tmp_file=$(mktemp)
+            aws lambda invoke \
+                --function-name "$LAMBDA_NEWSLETTER" \
+                --payload '{}' \
+                --cli-binary-format raw-in-base64-out \
+                "$tmp_file" \
+                --no-cli-pager >/dev/null 2>&1
+
+            if [ -f "$tmp_file" ]; then
+                local status_code
+                status_code=$(cat "$tmp_file" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('statusCode', 0))" 2>/dev/null || echo "0")
+                if [ "$status_code" = "200" ]; then
+                    print_ok "Newsletter sent!"
+                    local summaries recipient
+                    summaries=$(cat "$tmp_file" | python3 -c "import sys,json; b=json.loads(json.load(sys.stdin)['body']); print(b.get('summaries_count','?'))" 2>/dev/null || echo "?")
+                    recipient=$(cat "$tmp_file" | python3 -c "import sys,json; b=json.loads(json.load(sys.stdin)['body']); print(b.get('recipient','?'))" 2>/dev/null || echo "?")
+                    print_row "Summaries" "$summaries" "$CYAN"
+                    print_row "Recipient" "$recipient" "$WHITE"
+                else
+                    print_err "Newsletter failed"
+                fi
+                rm -f "$tmp_file"
+            fi
+
+            echo ""
+            print_inf "Cleanup: aws dynamodb delete-item --table-name $TABLE_NAME --key '{\"pk\":{\"S\":\"SUMMARY#$video_id\"},\"sk\":{\"S\":\"DATA\"}}'"
+            ;;
         *)
-            print_err "Usage: ./manage.sh newsletter <frequency|test> [value]"
+            print_err "Usage: ./manage.sh newsletter <frequency|test|test-insert> [value]"
             ;;
     esac
 }
@@ -573,19 +666,23 @@ cmd_apikeys() {
 
 cmd_info() {
     print_section "System Information" "📊"
+    local issues=()
 
-    # Channels
-    local raw
+    # --- Channels ---
+    local raw ch_count
     raw=$(get_ssm_value "youtube_channels")
-    local ch_count
     ch_count=$(echo "${raw:-[]}" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
     print_row "Channels" "$ch_count monitored" "$CYAN"
+    if [ "$ch_count" = "0" ]; then
+        print_warn "No YouTube channels configured"
+        issues+=("No YouTube channels configured — run: ./manage.sh channels add <ID>")
+    fi
 
-    # Newsletter schedule
+    # --- Newsletter schedule ---
     local rule
     rule=$(aws events describe-rule --name "${LAMBDA_NEWSLETTER}-schedule" --output json 2>/dev/null || echo "")
     if [ -n "$rule" ]; then
-        local sched state friendly
+        local sched state friendly sched_color
         sched=$(echo "$rule" | python3 -c "import sys,json; print(json.load(sys.stdin)['ScheduleExpression'])")
         state=$(echo "$rule" | python3 -c "import sys,json; print(json.load(sys.stdin)['State'])")
 
@@ -595,12 +692,19 @@ cmd_info() {
             *"1 * ? *"*)    friendly="Monthly" ;;
             *)              friendly="$sched" ;;
         esac
-        print_row "Newsletter" "$friendly ($state)" "$CYAN"
+        sched_color="$CYAN"
+        [ "$state" != "ENABLED" ] && sched_color="$YELLOW"
+        print_row "Newsletter" "$friendly ($state)" "$sched_color"
+        if [ "$state" != "ENABLED" ]; then
+            print_warn "Newsletter EventBridge rule is DISABLED"
+            issues+=("Newsletter schedule is DISABLED — newsletter will not be sent automatically")
+        fi
     else
         print_row "Newsletter" "Could not read schedule" "$YELLOW"
+        issues+=("Could not read newsletter EventBridge rule — is infrastructure deployed?")
     fi
 
-    # Email
+    # --- Email configuration ---
     local sender dest use_gmail email_method
     sender=$(get_ssm_value "sender_email")
     dest=$(get_ssm_value "destination_email")
@@ -609,10 +713,62 @@ cmd_info() {
     [ "$use_gmail" = "true" ] && email_method="Gmail SMTP"
 
     print_row "Email method" "$email_method" "$CYAN"
-    print_row "Sender" "${sender:-Not set}" "$WHITE"
-    print_row "Destination" "${dest:-Not set}" "$WHITE"
 
-    # LLM
+    if is_email_plausible "$sender"; then
+        print_row "Sender" "✅ $sender" "$GREEN"
+    else
+        print_row "Sender" "❌ Not set or invalid" "$RED"
+        issues+=("Sender email not configured — run: ./manage.sh email configure")
+    fi
+
+    if is_email_plausible "$dest"; then
+        print_row "Destination" "✅ $dest" "$GREEN"
+    else
+        print_row "Destination" "❌ Not set or invalid" "$RED"
+        issues+=("Destination email not configured — run: ./manage.sh email configure")
+    fi
+
+    # SES verification check (only if using SES)
+    if [ "$use_gmail" != "true" ]; then
+        local ses_result
+        ses_result=$(aws ses get-identity-verification-attributes \
+            --identities "$sender" "$dest" \
+            --output json 2>/dev/null || echo "")
+        if [ -n "$ses_result" ]; then
+            for email in "$sender" "$dest"; do
+                [ -z "$email" ] && continue
+                local ver_status
+                ver_status=$(echo "$ses_result" | python3 -c "import sys,json; d=json.load(sys.stdin); a=d.get('VerificationAttributes',{}).get('$email',{}); print(a.get('VerificationStatus',''))" 2>/dev/null || echo "")
+                if [ "$ver_status" = "Success" ]; then
+                    print_row "  SES: $email" "✅ Verified" "$GREEN"
+                else
+                    print_row "  SES: $email" "❌ Not verified" "$RED"
+                    issues+=("SES email '$email' is not verified — check your inbox for verification link")
+                fi
+            done
+        else
+            print_warn "Could not check SES verification status"
+        fi
+    else
+        # Gmail checks
+        local gmail_sender gmail_pass
+        gmail_sender=$(get_ssm_value "gmail_sender")
+        gmail_pass=$(get_ssm_value "gmail_app_password" "true")
+        if is_email_plausible "$gmail_sender"; then
+            print_row "Gmail sender" "✅ $gmail_sender" "$GREEN"
+        else
+            print_row "Gmail sender" "❌ Not set" "$RED"
+            issues+=("Gmail sender not configured — run: ./manage.sh email configure")
+        fi
+        if is_key_plausible "$gmail_pass"; then
+            print_row "Gmail app password" "✅ Configured" "$GREEN"
+        else
+            print_row "Gmail app password" "❌ Not set" "$RED"
+            issues+=("Gmail app password not configured — run: ./manage.sh apikeys")
+        fi
+    fi
+
+    # --- LLM ---
     local llm_config
     llm_config=$(get_ssm_value "llm_config")
     if [ -n "$llm_config" ]; then
@@ -624,25 +780,55 @@ cmd_info() {
         print_row "Language" "$language" "$WHITE"
     fi
 
-    # API Keys
-    local yt_key llm_key yt_status llm_status
+    # --- API Keys (with plausibility checks) ---
+    echo ""
+    echo -e "    ${YELLOW}🔑 ${WHITE}API Keys${NC}"
+
+    local yt_key llm_key
     yt_key=$(get_ssm_value "youtube_api_key" "true")
     llm_key=$(get_ssm_value "llm_api_key" "true")
-    yt_status="❌ Not set"
-    [ -n "$yt_key" ] && [ "$yt_key" != "PLACEHOLDER_REPLACE_ME" ] && yt_status="✅ Configured"
-    llm_status="❌ Not set"
-    [ -n "$llm_key" ] && [ "$llm_key" != "PLACEHOLDER_REPLACE_ME" ] && llm_status="✅ Configured"
-    print_row "YouTube API key" "$yt_status"
-    print_row "LLM API key" "$llm_status"
 
-    # Proxy
-    local ws_user proxy_status
-    ws_user=$(get_ssm_value "webshare_username")
-    proxy_status="None"
-    [ -n "$ws_user" ] && [ "$ws_user" != "PLACEHOLDER" ] && proxy_status="✅ Webshare ($ws_user)"
-    print_row "Proxy" "$proxy_status"
+    if is_key_plausible "$yt_key"; then
+        print_row "YouTube API key" "✅ Configured (${#yt_key} chars)" "$GREEN"
+    else
+        print_row "YouTube API key" "❌ Not set or placeholder" "$RED"
+        issues+=("YouTube API key is missing or invalid — run: ./manage.sh apikeys")
+    fi
 
-    # DynamoDB stats
+    if is_key_plausible "$llm_key"; then
+        print_row "LLM API key" "✅ Configured (${#llm_key} chars)" "$GREEN"
+    else
+        print_row "LLM API key" "❌ Not set or placeholder" "$RED"
+        issues+=("LLM API key is missing or invalid — run: ./manage.sh apikeys")
+    fi
+
+    # --- Proxy ---
+    local proxy_type
+    proxy_type=$(get_ssm_value "proxy_type")
+    if [ "$proxy_type" = "webshare" ]; then
+        local ws_user ws_pass
+        ws_user=$(get_ssm_value "webshare_username")
+        ws_pass=$(get_ssm_value "webshare_password" "true")
+        if is_key_plausible "$ws_user" && is_key_plausible "$ws_pass"; then
+            print_row "Proxy" "✅ Webshare ($ws_user)" "$GREEN"
+        else
+            print_row "Proxy" "❌ Webshare selected but credentials missing" "$RED"
+            issues+=("Webshare proxy selected but credentials not set — run: ./manage.sh apikeys")
+        fi
+    elif [ "$proxy_type" = "generic" ]; then
+        local gen_http
+        gen_http=$(get_ssm_value "generic_proxy_http_url" "true")
+        if is_key_plausible "$gen_http"; then
+            print_row "Proxy" "✅ Generic proxy" "$GREEN"
+        else
+            print_row "Proxy" "❌ Generic proxy selected but URL missing" "$RED"
+            issues+=("Generic proxy selected but URL not configured")
+        fi
+    else
+        print_row "Proxy" "None" "$WHITE"
+    fi
+
+    # --- DynamoDB stats ---
     echo ""
     echo -e "    ${YELLOW}📊 ${WHITE}DynamoDB Statistics${NC}"
 
@@ -670,7 +856,7 @@ cmd_info() {
         print_row "  $status" "$count" "$color"
     done
 
-    # DLQ
+    # --- DLQ ---
     local queue_url dlq_count dlq_color
     queue_url=$(aws sqs get-queue-url --queue-name "$DLQ_NAME" --output json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin)['QueueUrl'])" 2>/dev/null || echo "")
     if [ -n "$queue_url" ]; then
@@ -678,9 +864,12 @@ cmd_info() {
         dlq_color="$GREEN"
         [ "$dlq_count" != "0" ] && dlq_color="$RED"
         print_row "DLQ messages" "$dlq_count" "$dlq_color"
+        if [ "$dlq_count" != "0" ] && [ "$dlq_count" != "?" ]; then
+            issues+=("$dlq_count message(s) in DLQ — run: ./manage.sh errors")
+        fi
     fi
 
-    # Lambda functions
+    # --- Lambda functions ---
     echo ""
     echo -e "    ${YELLOW}⚡ ${WHITE}Lambda Functions${NC}"
 
@@ -697,8 +886,21 @@ cmd_info() {
             print_row "  $short_name" "✅ ${runtime} | ${memory}MB | ${timeout}s | $last_mod" "$GREEN"
         else
             print_row "  $short_name" "❌ Not deployed" "$RED"
+            issues+=("Lambda '$short_name' is not deployed — run: ./manage.sh deploy")
         fi
     done
+
+    # --- Health Summary ---
+    echo ""
+    if [ ${#issues[@]} -eq 0 ]; then
+        echo -e "    ${GREEN}🟢 Health check: All OK${NC}"
+    else
+        echo -e "    ${RED}🔴 Health check: ${#issues[@]} issue(s) found${NC}"
+        echo ""
+        for issue in "${issues[@]}"; do
+            print_err "$issue"
+        done
+    fi
 }
 
 # =============================================================================
@@ -827,26 +1029,31 @@ cmd_help() {
     echo ""
 
     declare -a help_cmds=(
+        "deploy:Deploy infrastructure changes (Terraform)"
         "channels list:List monitored channels with names"
         "channels add <ID>:Add a YouTube channel by ID"
         "channels remove <ID>:Remove a channel by ID"
         "channels clear:Remove all monitored channels"
+        "process <URL> [URL2...]:Process video(s): queue + monitor + newsletter"
         "newsletter frequency <f>:Set frequency: daily, weekly, monthly"
-        "newsletter test [URL]:Send a test newsletter"
+        "newsletter test:Invoke newsletter Lambda (send with existing data)"
+        "newsletter test-insert:Insert test summary + send newsletter"
         "errors:Show failed videos, DLQ, Lambda errors"
         "logs <function>:Tail CloudWatch logs (poller/processor/...)"
-        "apikeys update:Interactive API key update wizard"
-        "info:Full system status dashboard"
+        "apikeys:Interactive API key update wizard"
+        "info:System status + health check dashboard"
         "cleanup run:Manually trigger DynamoDB cleanup"
         "cleanup status:Show permanently failed record count"
         "retry list:Show videos awaiting transcript retry"
+        "email method <ses|gmail>:Switch email provider"
+        "email configure:Configure email settings"
         "help:Show this help message"
     )
 
     for entry in "${help_cmds[@]}"; do
         local cmd="${entry%%:*}"
         local desc="${entry#*:}"
-        printf "    ${CYAN}%-28s${NC}${GRAY}%s${NC}\n" "$cmd" "$desc"
+        printf "    ${CYAN}%-30s${NC}${GRAY}%s${NC}\n" "$cmd" "$desc"
     done
 
     echo ""
@@ -859,9 +1066,11 @@ cmd_help() {
 
     echo -e "  ${WHITE}EXAMPLES${NC}"
     echo -e "    ${DARK_GRAY}./manage.sh channels add \"UCBcRF18a7Qf58cCRy5xuWwQ\"${NC}"
+    echo -e "    ${DARK_GRAY}./manage.sh process \"https://youtube.com/watch?v=abc123\"${NC}"
     echo -e "    ${DARK_GRAY}./manage.sh newsletter frequency weekly${NC}"
+    echo -e "    ${DARK_GRAY}./manage.sh newsletter test-insert${NC}"
     echo -e "    ${DARK_GRAY}./manage.sh logs processor --lines 100${NC}"
-    echo -e "    ${DARK_GRAY}./manage.sh errors --days-back 14${NC}"
+    echo -e "    ${DARK_GRAY}./manage.sh info${NC}"
     echo ""
 }
 
@@ -898,8 +1107,256 @@ done
 
 print_banner
 
+
+
+
+cmd_email() {
+    local sub="${1:-}"
+    local arg="${2:-}"
+
+    case "$sub" in
+        method)
+            if [[ "$arg" != "ses" && "$arg" != "gmail" ]]; then
+                print_err "Usage: ./manage.sh email method <ses|gmail>"
+                return
+            fi
+            print_section "Email Method: $arg" "📧"
+            
+            local use_gmail="false"
+            [ "$arg" = "gmail" ] && use_gmail="true"
+            
+            # Update SSM
+            set_ssm_value "use_gmail_smtp" "$use_gmail"
+            print_ok "Email method updated to $arg"
+            ;;
+        configure)
+            print_section "Configure Email" "📧"
+            
+            echo -n "    Sender Email (SES verified or Gmail address): "
+            read -r sender
+            if [ -n "$sender" ]; then
+                set_ssm_value "sender_email" "$sender"
+                print_ok "Sender updated"
+            fi
+            
+            echo -n "    Destination Email: "
+            read -r dest
+            if [ -n "$dest" ]; then
+                set_ssm_value "destination_email" "$dest"
+                print_ok "Destination updated"
+            fi
+            
+            local use_gmail
+            use_gmail=$(get_ssm_value "use_gmail_smtp")
+            
+            if [ "$use_gmail" = "true" ]; then
+                echo ""
+                print_inf "Gmail SMTP settings:"
+                
+                echo -n "    Gmail Address (usually same as Sender): "
+                read -r gmail_sender
+                if [ -n "$gmail_sender" ]; then
+                    set_ssm_value "gmail_sender" "$gmail_sender"
+                    print_ok "Gmail sender updated"
+                fi
+                
+                echo -n "    Gmail App Password: "
+                read -r gmail_pass
+                if [ -n "$gmail_pass" ]; then
+                    set_ssm_value "gmail_app_password" "$gmail_pass" "SecureString"
+                    print_ok "Gmail app password updated"
+                fi
+            fi
+            ;;
+        *)
+            print_err "Usage: ./manage.sh email <method|configure>"
+            ;;
+    esac
+}
+
+# =============================================================================
+# Command: deploy
+# =============================================================================
+
+cmd_deploy() {
+    print_section "Deploy Infrastructure" "🚀"
+    
+    local terraform_dir="$(dirname "$0")/../infra"
+    
+    if [ ! -d "$terraform_dir" ]; then
+        print_err "Terraform directory not found at $terraform_dir"
+        return
+    fi
+    
+    cd "$terraform_dir"
+    
+    print_inf "Initializing Terraform..."
+    terraform init
+    
+    print_inf "Planning deployment..."
+    terraform plan -out=tfplan
+    
+    if confirm_action "Do you want to apply this plan?"; then
+        print_inf "Applying changes..."
+        terraform apply "tfplan"
+        print_ok "Deployment complete!"
+        
+        # Reminder
+        echo ""
+        print_inf "Remember to configure your application if this is a fresh deploy:"
+        echo -e "  ${CYAN}./manage.sh apikeys${NC}"
+        echo -e "  ${CYAN}./manage.sh email configure${NC}"
+        echo -e "  ${CYAN}./manage.sh channels add <ID>${NC}"
+    else
+        print_inf "Deployment cancelled."
+    fi
+    
+    [ -f "tfplan" ] && rm "tfplan"
+    cd - >/dev/null
+}
+
+# =============================================================================
+# Command: process (video pipeline — merged from vidscribe.sh)
+# =============================================================================
+
+cmd_process() {
+    local url1="${1:-}"
+
+    if [ -z "$url1" ]; then
+        print_err "Usage: ./manage.sh process <URL1> [URL2...]"
+        return
+    fi
+
+    print_section "Video Processing Pipeline" "🚀"
+
+    # Collect video IDs
+    local video_ids=()
+    local urls=("$url1")
+    [ -n "${2:-}" ] && urls+=("$2")
+
+    for u in "${urls[@]}"; do
+        video_ids+=("$(extract_video_id "$u")")
+    done
+    print_inf "Video IDs: ${video_ids[*]}"
+
+    # 1. Check SQS queue
+    echo ""
+    echo -e "    ${YELLOW}🔍 ${WHITE}Checking AWS Resources${NC}"
+
+    local queue_url
+    queue_url=$(aws sqs get-queue-url --queue-name "$QUEUE_NAME" --output json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin)['QueueUrl'])" 2>/dev/null || echo "")
+    if [ -z "$queue_url" ]; then
+        print_err "SQS queue not found. Is the infrastructure deployed?"
+        print_inf "Run: ./manage.sh deploy"
+        return
+    fi
+    print_ok "Queue: $QUEUE_NAME"
+
+    local start_time
+    start_time=$(python3 -c "import time; print(int(time.time()*1000))")
+
+    # 2. Inject videos
+    echo ""
+    echo -e "    ${YELLOW}💉 ${WHITE}Injecting ${#video_ids[@]} video(s) into queue${NC}"
+
+    for vid in "${video_ids[@]}"; do
+        local body
+        body=$(python3 -c "
+import json, datetime
+print(json.dumps({
+    'video_id': '$vid',
+    'title': 'Manual: $vid',
+    'channel_id': 'MANUAL',
+    'channel_title': 'Manual Trigger',
+    'published_at': datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+}))")
+        aws sqs send-message --queue-url "$queue_url" --message-body "$body" --no-cli-pager >/dev/null 2>&1 || { print_err "Failed to inject $vid"; continue; }
+        print_inf "→ $vid"
+    done
+    print_ok "All videos queued"
+
+    # 3. Monitor processing
+    local wait_timeout=300
+    echo ""
+    echo -e "    ${YELLOW}⏳ ${WHITE}Waiting for processing (max ${wait_timeout}s)${NC}"
+
+    local pending=("${video_ids[@]}")
+    local elapsed=0
+    local poll_interval=5
+    local processor_log_group="${LOG_GROUPS[processor]}"
+
+    while [ ${#pending[@]} -gt 0 ] && [ $elapsed -lt $wait_timeout ]; do
+        sleep $poll_interval
+        elapsed=$((elapsed + poll_interval))
+
+        local log_output
+        log_output=$(aws logs filter-log-events \
+            --log-group-name "$processor_log_group" \
+            --start-time "$start_time" \
+            --output json 2>/dev/null || echo "")
+
+        if [ -n "$log_output" ]; then
+            local new_pending=()
+            for vid in "${pending[@]}"; do
+                if echo "$log_output" | grep -q "Successfully processed video: $vid"; then
+                    print_ok "Processed: $vid"
+                elif echo "$log_output" | grep -qi "error.*$vid\|failed.*$vid"; then
+                    print_err "Failed: $vid"
+                else
+                    new_pending+=("$vid")
+                fi
+            done
+            pending=("${new_pending[@]}")
+        fi
+
+        echo -n "."
+    done
+
+    echo ""
+    if [ ${#pending[@]} -gt 0 ]; then
+        print_warn "Timeout! Still pending: ${pending[*]}"
+        print_inf "Videos may still be processing. Check: ./manage.sh logs processor"
+    else
+        print_ok "All videos processed!"
+    fi
+
+    # 4. Send newsletter
+    echo ""
+    echo -e "    ${YELLOW}📧 ${WHITE}Sending Newsletter${NC}"
+
+    local tmp_file
+    tmp_file=$(mktemp)
+    aws lambda invoke \
+        --function-name "$LAMBDA_NEWSLETTER" \
+        --cli-binary-format raw-in-base64-out \
+        "$tmp_file" \
+        --no-cli-pager >/dev/null 2>&1
+
+    if [ -f "$tmp_file" ]; then
+        local status_code
+        status_code=$(cat "$tmp_file" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('statusCode',0))" 2>/dev/null || echo "0")
+        if [ "$status_code" = "200" ]; then
+            print_ok "Newsletter sent!"
+            local summaries
+            summaries=$(cat "$tmp_file" | python3 -c "import sys,json; b=json.loads(json.load(sys.stdin)['body']); print(b.get('summaries_count','?'))" 2>/dev/null || echo "?")
+            print_row "Summaries" "$summaries" "$CYAN"
+        else
+            local error_msg
+            error_msg=$(cat "$tmp_file" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('errorMessage',d.get('body','unknown error')))" 2>/dev/null || echo "unknown error")
+            print_err "Newsletter error: $error_msg"
+        fi
+        rm -f "$tmp_file"
+    fi
+
+    echo ""
+    print_ok "WORKFLOW COMPLETE"
+}
+
+
 case "${COMMAND:-help}" in
+    deploy)     cmd_deploy ;;
     channels)   cmd_channels "$SUBCOMMAND" "$ARGUMENT" ;;
+    process)    cmd_process "$SUBCOMMAND" "$ARGUMENT" ;;
     newsletter) cmd_newsletter "$SUBCOMMAND" "$ARGUMENT" ;;
     errors)     cmd_errors ;;
     logs)       cmd_logs "$SUBCOMMAND" ;;
@@ -907,6 +1364,7 @@ case "${COMMAND:-help}" in
     info)       cmd_info ;;
     cleanup)    cmd_cleanup "$SUBCOMMAND" ;;
     retry)      cmd_retry ;;
+    email)      cmd_email "$SUBCOMMAND" "$ARGUMENT" ;;
     help)       cmd_help ;;
     *)
         print_err "Unknown command: $COMMAND"

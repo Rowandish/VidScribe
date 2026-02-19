@@ -13,67 +13,57 @@ project_name = "vidscribe"
 environment  = "prod"
 
 # -----------------------------------------------------------------------------
-# Windows Users: Uncomment the line below to use PowerShell scripts
-# Linux/Mac/CI users should leave this as false (default)
+# Windows Users: Enable PowerShell scripts for local Terraform operations
+# Set to false or remove for Linux/Mac
 # -----------------------------------------------------------------------------
 # use_windows_scripts = true
 
-# -----------------------------------------------------------------------------
-# Email Configuration (REQUIRED)
-# Both emails must be verified in SES before sending
-# -----------------------------------------------------------------------------
-sender_email      = "your-verified-sender@example.com"
-destination_email = "your-email@example.com"
-admin_email       = "admin@example.com"  # For error notifications
+# =============================================================================
+# Application Configuration (Managed via manage.ps1 / SSM)
+# =============================================================================
+# The following variables are used ONLY for the initial creation of SSM parameters.
+# After deployment, use 'manage.ps1' to update these values.
+# Terraform is configured to ignore changes to these values to prevent overwriting.
+# =============================================================================
 
-# -----------------------------------------------------------------------------
-# YouTube Configuration
-# Add the channel IDs you want to monitor (not the channel names!)
-# You can find the channel ID in the URL: youtube.com/channel/CHANNEL_ID
-# -----------------------------------------------------------------------------
-youtube_channels = "[\"UCBcRF18a7Qf58cCRy5xuWwQ\"]"
+# Email Configuration (Initial Seeding)
+# sender_email      = "your-verified-sender@example.com"
+# destination_email = "your-email@example.com"
+# admin_email       = "admin@example.com"
 
-# -----------------------------------------------------------------------------
-# LLM Configuration
-# Supported providers: "gemini" or "groq"
-# -----------------------------------------------------------------------------
-llm_provider = "gemini"
-llm_model    = "gemini-flash-latest"
+# YouTube Configuration (Initial Seeding)
+# youtube_channels = ["UCBcRF18a7Qf58cCRy5xuWwQ"]
 
-# For Groq, use:
-# llm_provider = "groq"
-# llm_model    = "llama-3.1-70b-versatile"
+# LLM Configuration (Initial Seeding)
+# llm_provider = "gemini"
+# llm_model    = "gemini-1.5-flash"
+# summarization_language = "Italian"
 
-# -----------------------------------------------------------------------------
-# API Keys (Sensitive - prefer GitHub Secrets or environment variables)
-# These can also be set via:
-#   TF_VAR_youtube_api_key=xxx
-#   TF_VAR_llm_api_key=xxx
-# -----------------------------------------------------------------------------
-# youtube_api_key = "your-youtube-data-api-v3-key"
-# llm_api_key     = "your-gemini-or-groq-api-key"
+# =============================================================================
+# API Keys & Secrets
+# =============================================================================
+# These should NEVER be committed. Use 'manage.ps1 apikeys' to set them.
+# youtube_api_key = "..."
+# llm_api_key     = "..."
 
-# -----------------------------------------------------------------------------
-# Optional: Customize Lambda settings
-# -----------------------------------------------------------------------------
+# =============================================================================
+# Lambda Customization (Optional)
+# =============================================================================
 # poller_timeout     = 60
 # processor_timeout  = 120
 # newsletter_timeout = 60
 # log_retention_days = 7
 # dynamodb_ttl_days  = 30
 
-# -----------------------------------------------------------------------------
-# Webshare Proxy (Optional - Recommended for YouTube)
-# -----------------------------------------------------------------------------
-# To avoid YouTube blocking cloud IPs, use a residential proxy.
-# webshare_username = "your-webshare-username"
-# webshare_password = "your-webshare-password"
-
-# -----------------------------------------------------------------------------
-# Gmail SMTP (Optional - Alternative to SES)
-# -----------------------------------------------------------------------------
-# Use Gmail to send emails if you don't want to set up SES domain verification.
-# Requires an App Password: https://myaccount.google.com/apppasswords
-# use_gmail_smtp     = true
-# gmail_sender       = "your-gmail@gmail.com"
-# gmail_app_password = "your-16-digit-app-password"
+# =============================================================================
+# Proxy & Gmail (Optional)
+# =============================================================================
+# Configure these using:
+#   .\manage.ps1 apikeys    (for proxy credentials)
+#   .\manage.ps1 email      (for Gmail credentials)
+#
+# webshare_username = "..."
+# webshare_password = "..."
+# use_gmail_smtp    = true
+# gmail_sender      = "..."
+# gmail_app_password = "..."

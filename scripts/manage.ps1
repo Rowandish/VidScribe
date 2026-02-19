@@ -172,6 +172,15 @@ function Get-ChannelName {
         return "?"
     }
 }
+function Extract-VideoId {
+    param([string]$Url)
+    if ($Url -match "^[a-zA-Z0-9_-]{11}$") { return $Url }
+    if ($Url -match "(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/|youtube\.com/v/)([a-zA-Z0-9_-]{11})") {
+        return $Matches[1]
+    }
+    return $Url
+}
+
 
 # =============================================================================
 # Command: channels
@@ -287,15 +296,70 @@ function Invoke-ChannelsClear {
 }
 
 # =============================================================================
+# Command: email
+# =============================================================================
+
+function Invoke-Email {
+    switch ($SubCommand) {
+        "method" {
+            if ($Argument -notin @("ses", "gmail")) {
+                Write-Err "Usage: .\manage.ps1 email method <ses|gmail>"
+                return
+            }
+            Write-Section "Email Method: $Argument" "📧"
+            
+            $useGmail = if ($Argument -eq "gmail") { "true" } else { "false" }
+            
+            # Update SSM
+            Set-SSMValue -Name "use_gmail_smtp" -Value $useGmail
+            Write-OK "Email method updated to $Argument"
+        }
+        "configure" {
+            Write-Section "Configure Email" "📧"
+            
+            # Common settings
+            $sender = Read-Host "    Sender Email (SES verified or Gmail address)"
+            if ($sender) { Set-SSMValue -Name "sender_email" -Value $sender; Write-OK "Sender updated" }
+            
+            $dest = Read-Host "    Destination Email"
+            if ($dest) { Set-SSMValue -Name "destination_email" -Value $dest; Write-OK "Destination updated" }
+            
+            # Gmail specific
+            $useGmail = Get-SSMValue -Name "use_gmail_smtp"
+            if ($useGmail -eq "true") {
+                Write-Host ""
+                Write-Inf "Gmail SMTP settings:"
+                
+                $gmailSender = Read-Host "    Gmail Address (usually same as Sender)"
+                if ($gmailSender) { 
+                    Set-SSMValue -Name "gmail_sender" -Value $gmailSender
+                    Write-OK "Gmail sender updated"
+                }
+                
+                $gmailPass = Read-Host "    Gmail App Password"
+                if ($gmailPass) { 
+                    Set-SSMValue -Name "gmail_app_password" -Value $gmailPass -Type "SecureString"
+                    Write-OK "Gmail app password updated"
+                }
+            }
+        }
+        default {
+            Write-Err "Usage: .\manage.ps1 email <method|configure>"
+        }
+    }
+}
+
+# =============================================================================
 # Command: newsletter
 # =============================================================================
 
 function Invoke-Newsletter {
     switch ($SubCommand) {
-        "frequency" { Invoke-NewsletterFrequency }
-        "test"      { Invoke-NewsletterTest }
-        default     {
-            Write-Err "Usage: .\manage.ps1 newsletter <frequency|test> [value]"
+        "frequency"    { Invoke-NewsletterFrequency }
+        "test"         { Invoke-NewsletterTest }
+        "test-insert"  { Invoke-NewsletterTestInsert }
+        default        {
+            Write-Err "Usage: .\manage.ps1 newsletter <frequency|test|test-insert> [value]"
         }
     }
 }
@@ -337,26 +401,105 @@ function Invoke-NewsletterFrequency {
 function Invoke-NewsletterTest {
     Write-Section "Send Test Newsletter" "📧"
 
-    if ($Argument) {
-        # Process a video first, then send newsletter
-        Write-Inf "Processing video and sending test newsletter..."
-        & "$PSScriptRoot\vidscribe.ps1" -Urls $Argument -TestNewsletter
-    } else {
-        Write-Inf "Invoking newsletter Lambda..."
-        $payload = @{ source = "manual-test"; "detail-type" = "Manual Test" } | ConvertTo-Json -Compress
-        $result = aws lambda invoke `
+    Write-Inf "Invoking newsletter Lambda..."
+    $payload = @{ source = "manual-test"; "detail-type" = "Manual Test" } | ConvertTo-Json -Compress
+
+    try {
+        $tmpFile = [System.IO.Path]::GetTempFileName()
+        aws lambda invoke `
             --function-name $Script:LAMBDA_NEWSLETTER `
             --payload $payload `
             --cli-binary-format raw-in-base64-out `
-            --output json `
-            /dev/null 2>$null | ConvertFrom-Json
+            $tmpFile 2>$null | Out-Null
 
-        if ($result.StatusCode -eq 200) {
+        $response = Get-Content $tmpFile | ConvertFrom-Json
+        Remove-Item $tmpFile -Force
+
+        if ($response.statusCode -eq 200) {
             Write-OK "Test newsletter sent successfully"
+            $body = $response.body | ConvertFrom-Json
+            Write-Row -Label "Summaries" -Value $body.summaries_count -Color Cyan
+            Write-Row -Label "Recipient" -Value $body.recipient -Color White
         } else {
-            Write-Err "Newsletter invocation failed (status: $($result.StatusCode))"
+            Write-Err "Newsletter invocation failed"
+            if ($response.body) { Write-Inf $response.body }
         }
+    } catch {
+        Write-Err "Could not invoke newsletter Lambda: $_"
     }
+}
+
+function Invoke-NewsletterTestInsert {
+    Write-Section "Insert Test Summary & Send Newsletter" "🧪"
+
+    $now = Get-Date -Format "yyyy-MM-ddTHH:mm:ssK"
+    $ttl = [int](Get-Date).AddDays(30).ToUniversalTime().Subtract([datetime]'1970-01-01').TotalSeconds
+    $videoId = "test-$(Get-Random -Minimum 1000 -Maximum 9999)"
+
+    Write-Inf "Inserting test summary (ID: $videoId)..."
+
+    $item = @{
+        pk = @{ S = "SUMMARY#$videoId" }
+        sk = @{ S = "DATA" }
+        gsi1pk = @{ S = "SUMMARY" }
+        gsi1sk = @{ S = $now }
+        video_id = @{ S = $videoId }
+        title = @{ S = "🧪 Test Video - VidScribe Pipeline Test" }
+        channel_title = @{ S = "VidScribe Test Channel" }
+        summary = @{ S = @"
+This is a test video to verify the VidScribe system works correctly.
+
+**Features tested:**
+- DynamoDB data insertion
+- Newsletter Lambda invocation
+- HTML email formatting
+- Send via SES or Gmail
+
+If you receive this email, the system is operational! 🎉
+"@ }
+        published_at = @{ S = $now }
+        summarized_at = @{ S = $now }
+        ttl = @{ N = $ttl.ToString() }
+    }
+
+    try {
+        aws dynamodb put-item `
+            --table-name $Script:TABLE_NAME `
+            --item ($item | ConvertTo-Json -Depth 10 -Compress) `
+            --no-cli-pager 2>$null | Out-Null
+        Write-OK "Test data inserted"
+    } catch {
+        Write-Err "Failed to insert test data: $_"
+        return
+    }
+
+    Write-Inf "Invoking newsletter Lambda..."
+    try {
+        $tmpFile = [System.IO.Path]::GetTempFileName()
+        aws lambda invoke `
+            --function-name $Script:LAMBDA_NEWSLETTER `
+            --payload '{}' `
+            --cli-binary-format raw-in-base64-out `
+            $tmpFile `
+            --no-cli-pager 2>$null | Out-Null
+
+        $response = Get-Content $tmpFile -Raw | ConvertFrom-Json
+        Remove-Item $tmpFile -Force
+
+        if ($response.statusCode -eq 200) {
+            Write-OK "Newsletter sent!"
+            $body = $response.body | ConvertFrom-Json
+            Write-Row -Label "Summaries" -Value $body.summaries_count -Color Cyan
+            Write-Row -Label "Recipient" -Value $body.recipient -Color White
+        } else {
+            Write-Err "Newsletter failed: $($response.body)"
+        }
+    } catch {
+        Write-Err "Could not invoke newsletter Lambda: $_"
+    }
+
+    Write-Host ""
+    Write-Inf "Cleanup: aws dynamodb delete-item --table-name $Script:TABLE_NAME --key '{`"pk`":{`"S`":`"SUMMARY#$videoId`"},`"sk`":{`"S`":`"DATA`"}}'" 
 }
 
 # =============================================================================
@@ -538,18 +681,38 @@ function Invoke-ApiKeys {
 }
 
 # =============================================================================
-# Command: info
+# Command: info (with health checks)
 # =============================================================================
+
+function Test-ApiKeyPlausible {
+    param([string]$Value)
+    if (-not $Value) { return $false }
+    if ($Value -eq "PLACEHOLDER_REPLACE_ME" -or $Value -eq "PLACEHOLDER") { return $false }
+    if ($Value.Length -lt 10) { return $false }
+    return $true
+}
+
+function Test-EmailPlausible {
+    param([string]$Value)
+    if (-not $Value) { return $false }
+    if ($Value -eq "PLACEHOLDER" -or $Value.Length -lt 5) { return $false }
+    return $Value -match ".+@.+\..+"
+}
 
 function Invoke-Info {
     Write-Section "System Information" "📊"
+    $issues = [System.Collections.Generic.List[string]]::new()
 
-    # Channels
+    # --- Channels ---
     $raw = Get-SSMValue -Name "youtube_channels"
     $channels = if ($raw) { @($raw | ConvertFrom-Json) } else { @() }
     Write-Row -Label "Channels" -Value "$($channels.Count) monitored" -Color Cyan
+    if ($channels.Count -eq 0) {
+        Write-Warn "No YouTube channels configured"
+        $issues.Add("No YouTube channels configured — run: .\manage.ps1 channels add <ID>")
+    }
 
-    # Newsletter schedule
+    # --- Newsletter schedule ---
     try {
         $rule = aws events describe-rule --name "$Script:LAMBDA_NEWSLETTER-schedule" --output json 2>$null | ConvertFrom-Json
         $sched = $rule.ScheduleExpression
@@ -560,22 +723,78 @@ function Invoke-Info {
             "cron\(.*1 \* \? \*\)" { "Monthly" }
             default { $sched }
         }
-        Write-Row -Label "Newsletter" -Value "$friendlySchedule ($state)" -Color Cyan
+        $schedColor = if ($state -eq "ENABLED") { "Cyan" } else { "Yellow" }
+        Write-Row -Label "Newsletter" -Value "$friendlySchedule ($state)" -Color $schedColor
+        if ($state -ne "ENABLED") {
+            Write-Warn "Newsletter EventBridge rule is DISABLED"
+            $issues.Add("Newsletter schedule is DISABLED — newsletter will not be sent automatically")
+        }
     } catch {
         Write-Row -Label "Newsletter" -Value "Could not read schedule" -Color Yellow
+        $issues.Add("Could not read newsletter EventBridge rule — is infrastructure deployed?")
     }
 
-    # Email configuration
+    # --- Email configuration ---
     $senderEmail = Get-SSMValue -Name "sender_email"
     $destEmail = Get-SSMValue -Name "destination_email"
     $useGmail = Get-SSMValue -Name "use_gmail_smtp"
     $emailMethod = if ($useGmail -eq "true") { "Gmail SMTP" } else { "Amazon SES" }
 
     Write-Row -Label "Email method" -Value $emailMethod -Color Cyan
-    Write-Row -Label "Sender" -Value ($senderEmail ?? "Not set") -Color White
-    Write-Row -Label "Destination" -Value ($destEmail ?? "Not set") -Color White
 
-    # LLM
+    if (Test-EmailPlausible $senderEmail) {
+        Write-Row -Label "Sender" -Value "✅ $senderEmail" -Color Green
+    } else {
+        Write-Row -Label "Sender" -Value "❌ Not set or invalid" -Color Red
+        $issues.Add("Sender email not configured — run: .\manage.ps1 email configure")
+    }
+
+    if (Test-EmailPlausible $destEmail) {
+        Write-Row -Label "Destination" -Value "✅ $destEmail" -Color Green
+    } else {
+        Write-Row -Label "Destination" -Value "❌ Not set or invalid" -Color Red
+        $issues.Add("Destination email not configured — run: .\manage.ps1 email configure")
+    }
+
+    # SES verification check (only if using SES)
+    if ($useGmail -ne "true") {
+        try {
+            $identities = aws ses get-identity-verification-attributes `
+                --identities $senderEmail $destEmail `
+                --output json 2>$null | ConvertFrom-Json
+
+            foreach ($email in @($senderEmail, $destEmail)) {
+                if (-not $email) { continue }
+                $attr = $identities.VerificationAttributes.$email
+                if ($attr -and $attr.VerificationStatus -eq "Success") {
+                    Write-Row -Label "  SES: $email" -Value "✅ Verified" -Color Green
+                } else {
+                    Write-Row -Label "  SES: $email" -Value "❌ Not verified" -Color Red
+                    $issues.Add("SES email '$email' is not verified — check your inbox for verification link")
+                }
+            }
+        } catch {
+            Write-Warn "Could not check SES verification status"
+        }
+    } else {
+        # Gmail checks
+        $gmailSender = Get-SSMValue -Name "gmail_sender"
+        $gmailPass = Get-SSMValue -Name "gmail_app_password" -Secure
+        if (Test-EmailPlausible $gmailSender) {
+            Write-Row -Label "Gmail sender" -Value "✅ $gmailSender" -Color Green
+        } else {
+            Write-Row -Label "Gmail sender" -Value "❌ Not set" -Color Red
+            $issues.Add("Gmail sender not configured — run: .\manage.ps1 email configure")
+        }
+        if (Test-ApiKeyPlausible $gmailPass) {
+            Write-Row -Label "Gmail app password" -Value "✅ Configured" -Color Green
+        } else {
+            Write-Row -Label "Gmail app password" -Value "❌ Not set" -Color Red
+            $issues.Add("Gmail app password not configured — run: .\manage.ps1 apikeys")
+        }
+    }
+
+    # --- LLM ---
     $llmConfig = Get-SSMValue -Name "llm_config"
     if ($llmConfig) {
         $llm = $llmConfig | ConvertFrom-Json
@@ -583,20 +802,52 @@ function Invoke-Info {
         Write-Row -Label "Language" -Value ($llm.language ?? "English") -Color White
     }
 
-    # API Keys status
+    # --- API Keys (with plausibility checks) ---
+    Write-Host ""
+    Write-Host "    🔑 " -NoNewline -ForegroundColor Yellow
+    Write-Host "API Keys" -ForegroundColor White
+
     $ytKey = Get-SSMValue -Name "youtube_api_key" -Secure
     $llmKey = Get-SSMValue -Name "llm_api_key" -Secure
-    $ytStatus = if ($ytKey -and $ytKey -ne "PLACEHOLDER_REPLACE_ME") { "✅ Configured" } else { "❌ Not set" }
-    $llmStatus = if ($llmKey -and $llmKey -ne "PLACEHOLDER_REPLACE_ME") { "✅ Configured" } else { "❌ Not set" }
-    Write-Row -Label "YouTube API key" -Value $ytStatus
-    Write-Row -Label "LLM API key" -Value $llmStatus
 
-    # Proxy
-    $wsUser = Get-SSMValue -Name "webshare_username"
-    $proxyStatus = if ($wsUser -and $wsUser -ne "PLACEHOLDER") { "✅ Webshare ($wsUser)" } else { "None" }
-    Write-Row -Label "Proxy" -Value $proxyStatus
+    if (Test-ApiKeyPlausible $ytKey) {
+        Write-Row -Label "YouTube API key" -Value "✅ Configured ($($ytKey.Length) chars)" -Color Green
+    } else {
+        Write-Row -Label "YouTube API key" -Value "❌ Not set or placeholder" -Color Red
+        $issues.Add("YouTube API key is missing or invalid — run: .\manage.ps1 apikeys")
+    }
 
-    # DynamoDB stats
+    if (Test-ApiKeyPlausible $llmKey) {
+        Write-Row -Label "LLM API key" -Value "✅ Configured ($($llmKey.Length) chars)" -Color Green
+    } else {
+        Write-Row -Label "LLM API key" -Value "❌ Not set or placeholder" -Color Red
+        $issues.Add("LLM API key is missing or invalid — run: .\manage.ps1 apikeys")
+    }
+
+    # --- Proxy ---
+    $proxyType = Get-SSMValue -Name "proxy_type"
+    if ($proxyType -eq "webshare") {
+        $wsUser = Get-SSMValue -Name "webshare_username"
+        $wsPass = Get-SSMValue -Name "webshare_password" -Secure
+        if ((Test-ApiKeyPlausible $wsUser) -and (Test-ApiKeyPlausible $wsPass)) {
+            Write-Row -Label "Proxy" -Value "✅ Webshare ($wsUser)" -Color Green
+        } else {
+            Write-Row -Label "Proxy" -Value "❌ Webshare selected but credentials missing" -Color Red
+            $issues.Add("Webshare proxy selected but credentials not set — run: .\manage.ps1 apikeys")
+        }
+    } elseif ($proxyType -eq "generic") {
+        $genHttp = Get-SSMValue -Name "generic_proxy_http_url" -Secure
+        if (Test-ApiKeyPlausible $genHttp) {
+            Write-Row -Label "Proxy" -Value "✅ Generic proxy" -Color Green
+        } else {
+            Write-Row -Label "Proxy" -Value "❌ Generic proxy selected but URL missing" -Color Red
+            $issues.Add("Generic proxy selected but URL not configured")
+        }
+    } else {
+        Write-Row -Label "Proxy" -Value "None" -Color White
+    }
+
+    # --- DynamoDB stats ---
     Write-Host ""
     Write-Host "    📊 " -NoNewline -ForegroundColor Yellow
     Write-Host "DynamoDB Statistics" -ForegroundColor White
@@ -608,7 +859,6 @@ function Invoke-Info {
             --output json 2>$null | ConvertFrom-Json
         Write-Row -Label "Total records" -Value $scanResult.Count -Color Cyan
 
-        # Count by status
         foreach ($status in @("QUEUED", "PROCESSED", "FAILED", "PERMANENTLY_FAILED")) {
             $countResult = aws dynamodb scan `
                 --table-name $Script:TABLE_NAME `
@@ -630,18 +880,21 @@ function Invoke-Info {
         Write-Warn "Could not read DynamoDB stats"
     }
 
-    # DLQ
+    # --- DLQ ---
     try {
         $queueUrl = (aws sqs get-queue-url --queue-name $Script:DLQ_NAME --output json 2>$null | ConvertFrom-Json).QueueUrl
         $attrs = (aws sqs get-queue-attributes --queue-url $queueUrl --attribute-names ApproximateNumberOfMessages --output json 2>$null | ConvertFrom-Json)
         $dlqCount = [int]$attrs.Attributes.ApproximateNumberOfMessages
         $dlqColor = if ($dlqCount -eq 0) { "Green" } else { "Red" }
         Write-Row -Label "DLQ messages" -Value $dlqCount -Color $dlqColor
+        if ($dlqCount -gt 0) {
+            $issues.Add("$dlqCount message(s) in DLQ — run: .\manage.ps1 errors")
+        }
     } catch {
         Write-Warn "Could not check DLQ"
     }
 
-    # Lambda functions status
+    # --- Lambda functions ---
     Write-Host ""
     Write-Host "    ⚡ " -NoNewline -ForegroundColor Yellow
     Write-Host "Lambda Functions" -ForegroundColor White
@@ -659,7 +912,23 @@ function Invoke-Info {
             $lastMod = $info.Configuration.LastModified
             Write-Row -Label "  $($func.Split('-')[-1])" -Value "✅ ${runtime} | ${memory}MB | ${timeout}s | $lastMod" -Color Green
         } catch {
-            Write-Row -Label "  $($func.Split('-')[-1])" -Value "❌ Not deployed" -Color Red
+            $shortName = $func.Split('-')[-1]
+            Write-Row -Label "  $shortName" -Value "❌ Not deployed" -Color Red
+            $issues.Add("Lambda '$shortName' is not deployed — run: .\manage.ps1 deploy")
+        }
+    }
+
+    # --- Health Summary ---
+    Write-Host ""
+    if ($issues.Count -eq 0) {
+        Write-Host "    " -NoNewline
+        Write-Host "🟢 Health check: All OK" -ForegroundColor Green
+    } else {
+        Write-Host "    " -NoNewline
+        Write-Host "🔴 Health check: $($issues.Count) issue(s) found" -ForegroundColor Red
+        Write-Host ""
+        foreach ($issue in $issues) {
+            Write-Err $issue
         }
     }
 }
@@ -762,6 +1031,198 @@ function Invoke-Retry {
 }
 
 # =============================================================================
+# Command: deploy
+# =============================================================================
+
+function Invoke-Deploy {
+    Write-Section "Deploy Infrastructure" "🚀"
+    
+    $terraformDir = Join-Path $PSScriptRoot ".." "infra"
+    
+    if (-not (Test-Path $terraformDir)) {
+        Write-Err "Terraform directory not found at $terraformDir"
+        return
+    }
+    
+    Push-Location $terraformDir
+    
+    try {
+        Write-Inf "Initializing Terraform..."
+        terraform init
+        
+        Write-Inf "Planning deployment..."
+        terraform plan -out=tfplan
+        
+        if (Confirm-Action "Do you want to apply this plan?") {
+            Write-Inf "Applying changes..."
+            terraform apply "tfplan"
+            Write-OK "Deployment complete!"
+            
+            # Reminder to configure things
+            Write-Host ""
+            Write-Inf "Remember to configure your application if this is a fresh deploy:"
+            Write-Host "  .\manage.ps1 apikeys" -ForegroundColor Cyan
+            Write-Host "  .\manage.ps1 email configure" -ForegroundColor Cyan
+            Write-Host "  .\manage.ps1 channels add <ID>" -ForegroundColor Cyan
+        } else {
+            Write-Inf "Deployment cancelled."
+        }
+    } catch {
+        Write-Err "Terraform failed: $_"
+    } finally {
+        if (Test-Path "tfplan") { Remove-Item "tfplan" }
+        Pop-Location
+    }
+}
+
+# =============================================================================
+# Command: process (video pipeline — merged from vidscribe.ps1)
+# =============================================================================
+
+function Invoke-Process {
+    if (-not $SubCommand) {
+        Write-Err "Usage: .\manage.ps1 process <URL1> [URL2...]"
+        Write-Inf "Options: -SkipNewsletter (process without sending newsletter)"
+        return
+    }
+
+    Write-Section "Video Processing Pipeline" "🚀"
+
+    # Collect all URLs from SubCommand and Argument
+    $urls = @($SubCommand)
+    if ($Argument) { $urls += $Argument }
+
+    $videoIds = $urls | ForEach-Object { Extract-VideoId $_ }
+    Write-Inf "Video IDs: $($videoIds -join ', ')"
+
+    # 1. Check SQS queue
+    Write-Host ""
+    Write-Host "    🔍 " -NoNewline -ForegroundColor Yellow
+    Write-Host "Checking AWS Resources" -ForegroundColor White
+
+    try {
+        $queueUrl = (aws sqs get-queue-url --queue-name $Script:QUEUE_NAME --output json 2>$null | ConvertFrom-Json).QueueUrl
+        if (-not $queueUrl) { throw "Queue not found" }
+        Write-OK "Queue: $Script:QUEUE_NAME"
+    } catch {
+        Write-Err "SQS queue not found. Is the infrastructure deployed?"
+        Write-Inf "Run: .\manage.ps1 deploy"
+        return
+    }
+
+    $startTime = [int64]((Get-Date).ToUniversalTime() - (Get-Date "1970-01-01").ToUniversalTime()).TotalMilliseconds
+
+    # 2. Inject videos
+    Write-Host ""
+    Write-Host "    💉 " -NoNewline -ForegroundColor Yellow
+    Write-Host "Injecting $($videoIds.Count) video(s) into queue" -ForegroundColor White
+
+    foreach ($vid in $videoIds) {
+        $body = @{
+            video_id      = $vid
+            title         = "Manual: $vid"
+            channel_id    = "MANUAL"
+            channel_title = "Manual Trigger"
+            published_at  = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+        } | ConvertTo-Json -Compress
+
+        try {
+            aws sqs send-message --queue-url $queueUrl --message-body $body --no-cli-pager 2>$null | Out-Null
+            Write-Inf "→ $vid"
+        } catch {
+            Write-Err "Failed to inject $vid"
+        }
+    }
+    Write-OK "All videos queued"
+
+    # 3. Monitor processing
+    $waitTimeout = 300
+    Write-Host ""
+    Write-Host "    ⏳ " -NoNewline -ForegroundColor Yellow
+    Write-Host "Waiting for processing (max ${waitTimeout}s)" -ForegroundColor White
+
+    $pending = [System.Collections.Generic.HashSet[string]]::new([string[]]$videoIds)
+    $elapsed = 0
+    $pollInterval = 5
+    $processorLogGroup = $Script:LOG_GROUPS["processor"]
+
+    while ($pending.Count -gt 0 -and $elapsed -lt $waitTimeout) {
+        Start-Sleep -Seconds $pollInterval
+        $elapsed += $pollInterval
+
+        try {
+            $logs = aws logs filter-log-events `
+                --log-group-name $processorLogGroup `
+                --start-time $startTime `
+                --output json 2>$null | ConvertFrom-Json
+
+            if ($logs -and $logs.events) {
+                foreach ($event in $logs.events) {
+                    $msg = $event.message
+                    if ($msg -match "Successfully processed video: (.+)") {
+                        $processedId = $Matches[1].Trim()
+                        if ($pending.Contains($processedId)) {
+                            $pending.Remove($processedId) | Out-Null
+                            Write-OK "Processed: $processedId"
+                        }
+                    }
+                    if ($msg -match "Error|Failed|Exception" -and $msg -match "video.*?([a-zA-Z0-9_-]{11})") {
+                        $failedId = $Matches[1]
+                        if ($pending.Contains($failedId)) {
+                            $pending.Remove($failedId) | Out-Null
+                            Write-Err "Failed: $failedId"
+                        }
+                    }
+                }
+            }
+        } catch { }
+
+        Write-Host "." -NoNewline -ForegroundColor DarkGray
+    }
+
+    Write-Host ""
+    if ($pending.Count -gt 0) {
+        Write-Warn "Timeout! Still pending: $($pending -join ', ')"
+        Write-Inf "Videos may still be processing. Check: .\manage.ps1 logs processor"
+    } else {
+        Write-OK "All videos processed!"
+    }
+
+    # 4. Send newsletter (unless skipped via Argument containing 'skip')
+    # Note: use manage.ps1 newsletter test to send manually if skipped
+    Write-Host ""
+    Write-Host "    📧 " -NoNewline -ForegroundColor Yellow
+    Write-Host "Sending Newsletter" -ForegroundColor White
+
+    try {
+        $tmpFile = [System.IO.Path]::GetTempFileName()
+        aws lambda invoke `
+            --function-name $Script:LAMBDA_NEWSLETTER `
+            --cli-binary-format raw-in-base64-out `
+            $tmpFile `
+            --no-cli-pager 2>$null | Out-Null
+
+        $response = Get-Content $tmpFile -Raw | ConvertFrom-Json
+        Remove-Item $tmpFile -Force
+
+        if ($response.statusCode -eq 200) {
+            Write-OK "Newsletter sent!"
+            $body = $response.body | ConvertFrom-Json
+            Write-Row -Label "Summaries" -Value $body.summaries_count -Color Cyan
+        } elseif ($response.errorMessage) {
+            Write-Err "Newsletter error: $($response.errorMessage)"
+        } else {
+            Write-Warn "Newsletter response: $($response | ConvertTo-Json -Compress)"
+        }
+    } catch {
+        Write-Err "Could not invoke newsletter Lambda: $_"
+    }
+
+    Write-Host ""
+    Write-OK "WORKFLOW COMPLETE"
+}
+
+# =============================================================================
 # Command: help
 # =============================================================================
 
@@ -775,23 +1236,28 @@ function Invoke-Help {
     Write-Host "  COMMANDS" -ForegroundColor White
     Write-Host ""
     $cmds = @(
+        @("deploy", "Deploy infrastructure changes (Terraform)"),
         @("channels list", "List monitored channels with names"),
         @("channels add <ID>", "Add a YouTube channel by ID"),
         @("channels remove <ID>", "Remove a channel by ID"),
         @("channels clear", "Remove all monitored channels"),
+        @("process <URL> [URL2...]", "Process video(s): queue + monitor + newsletter"),
         @("newsletter frequency <f>", "Set frequency: daily, weekly, monthly"),
-        @("newsletter test [URL]", "Send a test newsletter"),
+        @("newsletter test", "Invoke newsletter Lambda (send with existing data)"),
+        @("newsletter test-insert", "Insert test summary + send newsletter"),
         @("errors", "Show failed videos, DLQ, Lambda errors"),
         @("logs <function>", "Tail CloudWatch logs (poller/processor/...)"),
-        @("apikeys update", "Interactive API key update wizard"),
-        @("info", "Full system status dashboard"),
+        @("apikeys", "Interactive API key update wizard"),
+        @("info", "System status + health check dashboard"),
         @("cleanup run", "Manually trigger DynamoDB cleanup"),
         @("cleanup status", "Show permanently failed record count"),
         @("retry list", "Show videos awaiting transcript retry"),
+        @("email method <ses|gmail>", "Switch email provider"),
+        @("email configure", "Configure email settings"),
         @("help", "Show this help message")
     )
     foreach ($cmd in $cmds) {
-        Write-Host "    $($cmd[0].PadRight(28))" -NoNewline -ForegroundColor Cyan
+        Write-Host "    $($cmd[0].PadRight(30))" -NoNewline -ForegroundColor Cyan
         Write-Host $cmd[1] -ForegroundColor Gray
     }
 
@@ -805,9 +1271,11 @@ function Invoke-Help {
 
     Write-Host "  EXAMPLES" -ForegroundColor White
     Write-Host '    .\manage.ps1 channels add "UCBcRF18a7Qf58cCRy5xuWwQ"' -ForegroundColor DarkGray
+    Write-Host '    .\manage.ps1 process "https://youtube.com/watch?v=abc123"' -ForegroundColor DarkGray
     Write-Host '    .\manage.ps1 newsletter frequency weekly' -ForegroundColor DarkGray
+    Write-Host '    .\manage.ps1 newsletter test-insert' -ForegroundColor DarkGray
     Write-Host '    .\manage.ps1 logs processor -Lines 100' -ForegroundColor DarkGray
-    Write-Host '    .\manage.ps1 errors -DaysBack 14' -ForegroundColor DarkGray
+    Write-Host '    .\manage.ps1 info' -ForegroundColor DarkGray
     Write-Host ""
 }
 
@@ -818,7 +1286,9 @@ function Invoke-Help {
 Write-Banner
 
 switch ($Command) {
+    "deploy"     { Invoke-Deploy }
     "channels"   { Invoke-Channels }
+    "process"    { Invoke-Process }
     "newsletter" { Invoke-Newsletter }
     "errors"     { Invoke-Errors }
     "logs"       { Invoke-Logs }
@@ -826,6 +1296,7 @@ switch ($Command) {
     "info"       { Invoke-Info }
     "cleanup"    { Invoke-Cleanup }
     "retry"      { Invoke-Retry }
+    "email"      { Invoke-Email }
     "help"       { Invoke-Help }
     ""           { Invoke-Help }
     default      {

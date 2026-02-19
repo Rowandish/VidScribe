@@ -59,13 +59,12 @@ LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
 MAX_TRANSCRIPT_RETRIES = 3
 RETRY_SCHEDULE_DAYS = [1, 3, 5]  # days to wait after each attempt
 
-# Proxy configuration
-# PROXY_TYPE: 'webshare', 'generic', or 'none'
-PROXY_TYPE = os.environ.get("PROXY_TYPE", "none").lower()
-WEBSHARE_USERNAME = os.environ.get("WEBSHARE_USERNAME", "")
-WEBSHARE_PASSWORD = os.environ.get("WEBSHARE_PASSWORD", "")
-GENERIC_PROXY_HTTP_URL = os.environ.get("GENERIC_PROXY_HTTP_URL", "")
-GENERIC_PROXY_HTTPS_URL = os.environ.get("GENERIC_PROXY_HTTPS_URL", "")
+# Proxy configuration (SSM Parameter Names)
+SSM_PROXY_TYPE = os.environ.get("SSM_PROXY_TYPE", "/vidscribe/proxy_type")
+SSM_WEBSHARE_USERNAME = os.environ.get("SSM_WEBSHARE_USERNAME", "/vidscribe/webshare_username")
+SSM_WEBSHARE_PASSWORD = os.environ.get("SSM_WEBSHARE_PASSWORD", "/vidscribe/webshare_password")
+SSM_GENERIC_PROXY_HTTP_URL = os.environ.get("SSM_GENERIC_PROXY_HTTP_URL", "/vidscribe/generic_proxy_http_url")
+SSM_GENERIC_PROXY_HTTPS_URL = os.environ.get("SSM_GENERIC_PROXY_HTTPS_URL", "/vidscribe/generic_proxy_https_url")
 
 # Configure logging
 logger = logging.getLogger()
@@ -138,6 +137,48 @@ def calculate_ttl() -> int:
     return int(expiry_time.timestamp())
 
 
+def get_proxy_config() -> Optional[dict]:
+    """
+    Retrieve proxy configuration from SSM Parameter Store.
+    
+    Returns:
+        Dictionary with proxy configuration or None if proxy is disabled.
+    """
+    try:
+        # Get proxy type
+        proxy_type = get_ssm_parameter(SSM_PROXY_TYPE).lower()
+        
+        if proxy_type == "none":
+            return None
+            
+        proxy_config = {}
+        
+        if proxy_type == "webshare":
+            username = get_ssm_parameter(SSM_WEBSHARE_USERNAME)
+            password = get_ssm_parameter(SSM_WEBSHARE_PASSWORD, with_decryption=True)
+            
+            if username and password:
+                proxy_config = {
+                    "http": f"http://{username}:{password}@p.webshare.io:80",
+                    "https": f"http://{username}:{password}@p.webshare.io:80"
+                }
+        
+        elif proxy_type == "generic":
+            http_url = get_ssm_parameter(SSM_GENERIC_PROXY_HTTP_URL, with_decryption=True)
+            https_url = get_ssm_parameter(SSM_GENERIC_PROXY_HTTPS_URL, with_decryption=True)
+            
+            if http_url:
+                proxy_config["http"] = http_url
+            if https_url:
+                proxy_config["https"] = https_url
+                
+        return proxy_config if proxy_config else None
+        
+    except Exception as e:
+        logger.error(f"Failed to load proxy configuration: {e}")
+        return None
+
+
 def get_transcript(video_id: str) -> Optional[str]:
     """
     Download the transcript for a YouTube video using youtube-transcript-api.
@@ -161,23 +202,16 @@ def get_transcript(video_id: str) -> Optional[str]:
         return None
 
     try:
-        # Select proxy configuration based on PROXY_TYPE
-        proxy_config = None
-        
-        if PROXY_TYPE == "webshare" and WEBSHARE_USERNAME and WEBSHARE_PASSWORD:
-            logger.info(f"Using Webshare proxy for video {video_id}")
-            proxy_config = WebshareProxyConfig(
-                proxy_username=WEBSHARE_USERNAME,
-                proxy_password=WEBSHARE_PASSWORD,
-            )
-        elif PROXY_TYPE == "generic" and (GENERIC_PROXY_HTTP_URL or GENERIC_PROXY_HTTPS_URL):
-            logger.info(f"Using generic proxy for video {video_id}")
-            proxy_config = GenericProxyConfig(
-                http_url=GENERIC_PROXY_HTTP_URL or None,
-                https_url=GENERIC_PROXY_HTTPS_URL or None,
-            )
-        else:
-            logger.warning(f"No proxy configured (PROXY_TYPE={PROXY_TYPE}). Direct connection may be blocked.")
+        # Get proxy configuration from SSM
+        try:
+            proxy_config = get_proxy_config()
+            if proxy_config:
+                logger.info(f"Using proxy for video {video_id}")
+            else:
+                logger.info("No proxy configured. Using direct connection.")
+        except Exception as e:
+            logger.error(f"Failed to get proxy config: {e}. Defaulting to no proxy.")
+            proxy_config = None
         
         # Create API instance with or without proxy
         if proxy_config:
@@ -649,8 +683,10 @@ def lambda_handler(event: dict, context: Any) -> dict:
         llm_config = json.loads(llm_config_json)
         llm_api_key = get_ssm_parameter(SSM_LLM_API_KEY, with_decryption=True)
         
-        # Log proxy configuration
-        logger.info(f"Proxy configuration: PROXY_TYPE={PROXY_TYPE}")
+        llm_api_key = get_ssm_parameter(SSM_LLM_API_KEY, with_decryption=True)
+        
+        # Log proxy configuration status
+        # Note: Actual proxy details are fetched inside get_transcript to keep main handler clean
 
     except Exception as e:
         logger.error(f"Failed to load LLM configuration: {e}")

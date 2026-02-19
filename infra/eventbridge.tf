@@ -48,6 +48,10 @@ resource "aws_cloudwatch_event_rule" "newsletter_schedule" {
     Name     = "Newsletter Schedule"
     Function = "newsletter"
   }
+
+  lifecycle {
+    ignore_changes = [schedule_expression]
+  }
 }
 
 resource "aws_cloudwatch_event_target" "newsletter" {
