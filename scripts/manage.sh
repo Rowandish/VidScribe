@@ -1290,8 +1290,8 @@ cmd_deploy() {
     
     cd "$terraform_dir"
     
-    print_inf "Initializing Terraform..."
-    terraform init
+    print_inf "Initializing Terraform (reconfigure backend)..."
+    terraform init -reconfigure
     
     print_inf "Planning deployment..."
     terraform plan -out=tfplan

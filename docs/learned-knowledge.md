@@ -93,3 +93,8 @@ Raccoglitore delle informazioni apprese durante il lavoro sul progetto.
 - Contesto: lo stesso video appariva in newsletter successive quando il job girava piu volte nella finestra degli ultimi 7 giorni.
 - Apprendimento: la query newsletter filtrava solo per data (`gsi1sk >= week_ago`) senza stato di invio.
 - Impatto: dopo invio riuscito, i summary vanno marcati con `newsletter_sent_at` (e counter) e la query deve escludere i gia inviati.
+
+### 2026-02-19 - Deploy scripts should run `terraform init -reconfigure` after backend changes
+- Contesto: `manage.ps1 deploy` falliva con `Backend configuration changed` dopo migrazione backend a `use_lockfile`.
+- Apprendimento: quando il backend block cambia, `terraform init` standard non basta; serve `-reconfigure` (o `-migrate-state` nei casi di migrazione stato).
+- Impatto: gli script deploy devono usare `terraform init -reconfigure` per evitare interruzioni operative su aggiornamenti backend non distruttivi.
