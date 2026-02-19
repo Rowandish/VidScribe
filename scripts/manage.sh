@@ -1291,7 +1291,44 @@ cmd_deploy() {
     cd "$terraform_dir"
     
     print_inf "Initializing Terraform..."
-    terraform init
+    local init_output
+    local init_exit
+    set +e
+    init_output=$(terraform init -input=false 2>&1)
+    init_exit=$?
+    set -e
+
+    if [ $init_exit -ne 0 ]; then
+        if echo "$init_output" | grep -Eqi "backend configuration( block)? has changed|backend configuration changed"; then
+            print_warn "Backend configuration changed detected. Trying one-time reconfigure with saved backend settings..."
+
+            local backend_state_path=".terraform/terraform.tfstate"
+            local backend_bucket=""
+            local backend_region=""
+
+            if [ -f "$backend_state_path" ]; then
+                backend_bucket=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1], encoding='utf-8')); print(((d.get('backend') or {}).get('config') or {}).get('bucket',''))" "$backend_state_path" 2>/dev/null || echo "")
+                backend_region=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1], encoding='utf-8')); print(((d.get('backend') or {}).get('config') or {}).get('region',''))" "$backend_state_path" 2>/dev/null || echo "")
+            fi
+
+            if [ -n "$backend_bucket" ] && [ -n "$backend_region" ]; then
+                terraform init -reconfigure -input=false \
+                    -backend-config="bucket=${backend_bucket}" \
+                    -backend-config="region=${backend_region}" \
+                    -backend-config="use_lockfile=true"
+            else
+                print_err "Terraform backend changed and saved bucket/region were not found."
+                print_inf "Run: terraform init -reconfigure -backend-config=\"bucket=<bucket>\" -backend-config=\"region=<region>\" -backend-config=\"use_lockfile=true\""
+                cd - >/dev/null
+                return 1
+            fi
+        else
+            print_err "Terraform init failed:"
+            echo "$init_output"
+            cd - >/dev/null
+            return 1
+        fi
+    fi
     
     print_inf "Planning deployment..."
     terraform plan -out=tfplan

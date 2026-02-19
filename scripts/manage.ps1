@@ -1180,7 +1180,45 @@ function Invoke-Deploy {
         }
 
         Write-Inf "Initializing Terraform..."
-        terraform init
+        $initOutput = & terraform init -input=false 2>&1
+        $initExit = $LASTEXITCODE
+
+        if ($initExit -ne 0) {
+            $initText = ($initOutput | Out-String)
+
+            if (($initText -match "Backend configuration changed") -or ($initText -match "Backend configuration block has changed")) {
+                Write-Warn "Backend configuration changed detected. Trying one-time reconfigure with saved backend settings..."
+
+                $backendStatePath = Join-Path ".terraform" "terraform.tfstate"
+                $backendBucket = $null
+                $backendRegion = $null
+
+                if (Test-Path $backendStatePath) {
+                    try {
+                        $backendState = Get-Content $backendStatePath -Raw | ConvertFrom-Json
+                        $backendBucket = $backendState.backend.config.bucket
+                        $backendRegion = $backendState.backend.config.region
+                    } catch {
+                        Write-Warn "Could not parse $backendStatePath for backend settings."
+                    }
+                }
+
+                if ($backendBucket -and $backendRegion) {
+                    terraform init -reconfigure -input=false `
+                        -backend-config="bucket=$backendBucket" `
+                        -backend-config="region=$backendRegion" `
+                        -backend-config="use_lockfile=true"
+
+                    if ($LASTEXITCODE -ne 0) {
+                        throw "Terraform init -reconfigure failed. Run it manually with backend-config bucket/region."
+                    }
+                } else {
+                    throw "Terraform backend changed and saved bucket/region were not found. Run: terraform init -reconfigure -backend-config='bucket=<bucket>' -backend-config='region=<region>' -backend-config='use_lockfile=true'"
+                }
+            } else {
+                throw "Terraform init failed: $initText"
+            }
+        }
         
         Write-Inf "Planning deployment..."
         terraform plan -out=tfplan

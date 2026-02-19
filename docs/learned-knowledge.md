@@ -103,3 +103,8 @@ Raccoglitore delle informazioni apprese durante il lavoro sul progetto.
 - Contesto: dopo aver messo `terraform init -reconfigure` come default in deploy, Terraform richiedeva ogni volta `bucket` e `region` backend-config.
 - Apprendimento: `-reconfigure` forza la riconfigurazione backend e rompe il flusso "init una volta, deploy sempre"; va usato solo quando il backend cambia davvero.
 - Impatto: negli script deploy il default deve restare `terraform init`; in caso di backend change, eseguire `terraform init -reconfigure` manualmente una tantum.
+
+### 2026-02-19 - Deploy should auto-fallback to one-time backend reconfigure on mismatch
+- Contesto: `manage deploy` falliva con `Backend configuration changed` dopo aggiornamenti backend, mentre il comportamento atteso era continuita dei deploy senza prompt ripetuti.
+- Apprendimento: il flusso robusto e `terraform init -input=false` come default, con retry automatico `terraform init -reconfigure` solo quando compare esplicitamente mismatch backend e usando bucket/region salvati in `.terraform/terraform.tfstate`.
+- Impatto: deploy idempotente nel caso normale e autoriparazione non interattiva nei casi di backend drift compatibile, senza forzare `-reconfigure` a ogni esecuzione.

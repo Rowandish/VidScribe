@@ -233,7 +233,7 @@ summarization_language = "Italian"
 # Initialize Terraform with remote state
 terraform init \
   -backend-config="bucket=YOUR-UNIQUE-BUCKET-NAME" \
-  -backend-config="dynamodb_table=vidscribe-terraform-lock" \
+  -backend-config="use_lockfile=true" \
   -backend-config="region=eu-west-1"
 
 # Or use the management tool
