@@ -107,6 +107,10 @@ Please provide the newsletter-ready summary in {language}:"""
 class TranscriptBlockedError(Exception):
     """Raised when YouTube blocks transcript requests from the current IP/network."""
 
+
+class DependencyMissingError(Exception):
+    """Raised when required runtime dependencies are not available in Lambda."""
+
 # -----------------------------------------------------------------------------
 # Helper Functions
 # -----------------------------------------------------------------------------
@@ -198,8 +202,9 @@ def get_transcript(video_id: str) -> Optional[str]:
         Raises TranscriptBlockedError if YouTube blocks requests from this IP/network.
     """
     if YouTubeTranscriptApi is None:
-        logger.error("youtube-transcript-api not available")
-        return None
+        msg = "youtube-transcript-api not available"
+        logger.error(msg)
+        raise DependencyMissingError(msg)
 
     try:
         # Get proxy configuration from SSM
@@ -711,6 +716,10 @@ def lambda_handler(event: dict, context: Any) -> dict:
             # Step 1: Download the transcript
             try:
                 transcript = get_transcript(video_id)
+            except DependencyMissingError as e:
+                logger.error(f"Processor dependency missing for video {video_id}: {e}")
+                mark_video_failed(table, video_id, str(e), failure_reason="DEPENDENCY_MISSING")
+                continue
             except TranscriptBlockedError as e:
                 # Cloud IP blocked: don't retry forever; classify explicitly
                 logger.warning(f"Transcript blocked for video {video_id}: {e}")

@@ -69,6 +69,15 @@ class TestProcessorLambda:
             assert result is None
             mock_api.list.assert_called_once_with("test-video-id")
 
+    @mock_aws
+    def test_get_transcript_dependency_missing(self):
+        """Test explicit error when youtube-transcript-api is unavailable."""
+        with patch("src.processor.handler.YouTubeTranscriptApi", None):
+            from src.processor.handler import DependencyMissingError, get_transcript
+
+            with pytest.raises(DependencyMissingError):
+                get_transcript("test-video-id")
+
     
     @patch("urllib.request.urlopen")
     def test_summarize_with_gemini_success(self, mock_urlopen):

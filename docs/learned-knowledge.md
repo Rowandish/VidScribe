@@ -63,3 +63,8 @@ Raccoglitore delle informazioni apprese durante il lavoro sul progetto.
 - Contesto: errore runtime Lambda `youtube-transcript-api not available` nonostante dipendenza presente nello zip layer.
 - Apprendimento: `build_layers.ps1` zippava il contenuto di `layer/python` a root, ma Lambda Python layer richiede file sotto `python/`.
 - Impatto: il build script PowerShell deve zippare da `layer/` e validare la presenza del prefisso `python/` per evitare layer non importabili.
+
+### 2026-02-19 - Missing transcript dependency must not be classified as NO_TRANSCRIPT
+- Contesto: failure reason in DynamoDB mostrava `NO_TRANSCRIPT` anche quando il vero problema era `youtube-transcript-api not available`.
+- Apprendimento: assenza della libreria runtime e transcript non disponibile sono condizioni diverse e richiedono remediation diverse.
+- Impatto: il processor deve classificare il caso come `DEPENDENCY_MISSING` per rendere immediata la diagnosi operativa.
