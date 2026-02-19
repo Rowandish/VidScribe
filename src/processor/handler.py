@@ -141,12 +141,12 @@ def calculate_ttl() -> int:
     return int(expiry_time.timestamp())
 
 
-def get_proxy_config() -> Optional[dict]:
+def get_proxy_config() -> Optional[Any]:
     """
     Retrieve proxy configuration from SSM Parameter Store.
     
     Returns:
-        Dictionary with proxy configuration or None if proxy is disabled.
+        Proxy configuration object for youtube-transcript-api, or None if disabled.
     """
     try:
         # Get proxy type
@@ -154,29 +154,30 @@ def get_proxy_config() -> Optional[dict]:
         
         if proxy_type == "none":
             return None
-            
-        proxy_config = {}
         
         if proxy_type == "webshare":
             username = get_ssm_parameter(SSM_WEBSHARE_USERNAME)
             password = get_ssm_parameter(SSM_WEBSHARE_PASSWORD, with_decryption=True)
             
-            if username and password:
-                proxy_config = {
-                    "http": f"http://{username}:{password}@p.webshare.io:80",
-                    "https": f"http://{username}:{password}@p.webshare.io:80"
-                }
+            if username and password and WebshareProxyConfig is not None:
+                return WebshareProxyConfig(
+                    proxy_username=username,
+                    proxy_password=password
+                )
+            return None
         
         elif proxy_type == "generic":
             http_url = get_ssm_parameter(SSM_GENERIC_PROXY_HTTP_URL, with_decryption=True)
             https_url = get_ssm_parameter(SSM_GENERIC_PROXY_HTTPS_URL, with_decryption=True)
             
-            if http_url:
-                proxy_config["http"] = http_url
-            if https_url:
-                proxy_config["https"] = https_url
-                
-        return proxy_config if proxy_config else None
+            if (http_url or https_url) and GenericProxyConfig is not None:
+                return GenericProxyConfig(
+                    http_url=http_url or None,
+                    https_url=https_url or None
+                )
+            return None
+
+        return None
         
     except Exception as e:
         logger.error(f"Failed to load proxy configuration: {e}")

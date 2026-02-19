@@ -78,6 +78,50 @@ class TestProcessorLambda:
             with pytest.raises(DependencyMissingError):
                 get_transcript("test-video-id")
 
+    def test_get_proxy_config_webshare_returns_proxy_object(self):
+        """Webshare proxy config should be built as WebshareProxyConfig object."""
+        with patch("src.processor.handler.get_ssm_parameter") as mock_ssm, \
+             patch("src.processor.handler.WebshareProxyConfig") as mock_proxy_cls:
+            mock_ssm.side_effect = lambda name, with_decryption=False: {
+                "/vidscribe/proxy_type": "webshare",
+                "/vidscribe/webshare_username": "ws-user",
+                "/vidscribe/webshare_password": "ws-pass"
+            }[name]
+
+            proxy_obj = object()
+            mock_proxy_cls.return_value = proxy_obj
+
+            from src.processor.handler import get_proxy_config
+            result = get_proxy_config()
+
+            assert result is proxy_obj
+            mock_proxy_cls.assert_called_once_with(
+                proxy_username="ws-user",
+                proxy_password="ws-pass"
+            )
+
+    def test_get_proxy_config_generic_returns_proxy_object(self):
+        """Generic proxy config should be built as GenericProxyConfig object."""
+        with patch("src.processor.handler.get_ssm_parameter") as mock_ssm, \
+             patch("src.processor.handler.GenericProxyConfig") as mock_proxy_cls:
+            mock_ssm.side_effect = lambda name, with_decryption=False: {
+                "/vidscribe/proxy_type": "generic",
+                "/vidscribe/generic_proxy_http_url": "http://user:pass@proxy.example:8080",
+                "/vidscribe/generic_proxy_https_url": "http://user:pass@proxy.example:8080"
+            }[name]
+
+            proxy_obj = object()
+            mock_proxy_cls.return_value = proxy_obj
+
+            from src.processor.handler import get_proxy_config
+            result = get_proxy_config()
+
+            assert result is proxy_obj
+            mock_proxy_cls.assert_called_once_with(
+                http_url="http://user:pass@proxy.example:8080",
+                https_url="http://user:pass@proxy.example:8080"
+            )
+
     
     @patch("urllib.request.urlopen")
     def test_summarize_with_gemini_success(self, mock_urlopen):

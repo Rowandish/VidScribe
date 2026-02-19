@@ -78,3 +78,8 @@ Raccoglitore delle informazioni apprese durante il lavoro sul progetto.
 - Contesto: alcune email mostravano testo Markdown raw perche il modulo `markdown` non era disponibile nel runtime.
 - Apprendimento: senza dipendenze aggiuntive, serve un renderer fallback per heading/liste/bold/italic/link/code.
 - Impatto: il formatter newsletter deve includere parser Markdown minimale lato stdlib per mantenere leggibilita HTML anche in ambienti ridotti.
+
+### 2026-02-19 - youtube-transcript-api proxy_config must be a proxy object, not a dict
+- Contesto: errore runtime `Error getting transcript ... 'dict' object has no attribute 'to_requests_dict'`.
+- Apprendimento: con le versioni recenti della libreria, `YouTubeTranscriptApi(proxy_config=...)` richiede `WebshareProxyConfig` o `GenericProxyConfig`.
+- Impatto: il processor deve costruire proxy object tipizzati in `get_proxy_config` per evitare failure immediato su tutte le trascrizioni proxate.
