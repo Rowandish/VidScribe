@@ -43,3 +43,8 @@ Raccoglitore delle informazioni apprese durante il lavoro sul progetto.
 - Contesto: `manage.ps1 process` restava in attesa fino al timeout di 300 secondi anche quando il processor aveva gia concluso.
 - Apprendimento: il monitoraggio basato solo su pattern nei log non copre alcuni esiti validi (es. `FAILED`/`PERMANENTLY_FAILED` senza log "success"), causando pending falsi.
 - Impatto: per evitare timeout inutili, il monitoraggio deve usare anche lo stato DynamoDB `VIDEO#{video_id}/METADATA.status` come source of truth.
+
+### 2026-02-19 - Process failure output should include DynamoDB reason and log excerpt
+- Contesto: durante `manage.ps1 process` compariva solo `Failed: <video_id> (FAILED)` senza indicazioni utili per debug.
+- Apprendimento: il motivo di failure vive nel record DynamoDB (`failure_reason`, `error`, `next_retry_at`) e i log processor filtrati per `video_id` aiutano a capire il punto esatto di rottura.
+- Impatto: su failure, `process` deve stampare motivazione sintetica e alcune righe log correlate per ridurre il tempo di diagnosi.

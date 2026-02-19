@@ -197,6 +197,73 @@ get_video_processing_status() {
         --output json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('Item',{}).get('status',{}).get('S',''))" 2>/dev/null || echo ""
 }
 
+get_video_processing_details_json() {
+    local video_id="$1"
+    local key_json
+    key_json="{\"pk\":{\"S\":\"VIDEO#${video_id}\"},\"sk\":{\"S\":\"METADATA\"}}"
+    aws dynamodb get-item \
+        --table-name "$TABLE_NAME" \
+        --key "$key_json" \
+        --consistent-read \
+        --output json 2>/dev/null | python3 -c "import sys,json; i=json.load(sys.stdin).get('Item',{}); out={'status':i.get('status',{}).get('S',''),'failure_reason':i.get('failure_reason',{}).get('S',''),'error':i.get('error',{}).get('S',''),'next_retry_at':i.get('next_retry_at',{}).get('S','')}; print(json.dumps(out))" 2>/dev/null || echo "{}"
+}
+
+get_processor_log_excerpt_for_video() {
+    local video_id="$1"
+    local start_time="$2"
+    local max_lines="${3:-8}"
+    local processor_log_group="${LOG_GROUPS[processor]}"
+    aws logs filter-log-events \
+        --log-group-name "$processor_log_group" \
+        --start-time "$start_time" \
+        --output json 2>/dev/null | python3 -c "import sys,json; vid='$video_id'; max_lines=$max_lines; d=json.load(sys.stdin); lines=[]; 
+for e in d.get('events', []):
+    m=str(e.get('message','')).replace('\\r',' ').replace('\\n',' ').strip()
+    if vid in m and m:
+        lines.append(m)
+for line in lines[-max_lines:]:
+    print(line)" 2>/dev/null || true
+}
+
+print_video_failure_diagnostics() {
+    local video_id="$1"
+    local start_time="$2"
+    local status="${3:-}"
+
+    local details_json
+    details_json=$(get_video_processing_details_json "$video_id")
+
+    local db_status reason error_msg next_retry
+    db_status=$(echo "$details_json" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "")
+    reason=$(echo "$details_json" | python3 -c "import sys,json; print(json.load(sys.stdin).get('failure_reason',''))" 2>/dev/null || echo "")
+    error_msg=$(echo "$details_json" | python3 -c "import sys,json; print(json.load(sys.stdin).get('error',''))" 2>/dev/null || echo "")
+    next_retry=$(echo "$details_json" | python3 -c "import sys,json; print(json.load(sys.stdin).get('next_retry_at',''))" 2>/dev/null || echo "")
+
+    [ -z "$status" ] && status="$db_status"
+    [ -z "$status" ] && status="FAILED"
+
+    print_err "Failed: $video_id ($status)"
+    [ -n "$reason" ] && print_inf "Reason: $reason"
+
+    if [ -n "$error_msg" ]; then
+        local short_error="$error_msg"
+        [ ${#short_error} -gt 220 ] && short_error="${short_error:0:217}..."
+        print_inf "Error: $short_error"
+    fi
+
+    [ -n "$next_retry" ] && print_inf "Next retry at: $next_retry"
+
+    local excerpt
+    excerpt=$(get_processor_log_excerpt_for_video "$video_id" "$start_time" "8")
+    if [ -n "$excerpt" ]; then
+        echo -e "      ${DARK_CYAN}Processor log excerpt for $video_id:${NC}"
+        while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            echo -e "      ${GRAY}• $line${NC}"
+        done <<< "$excerpt"
+    fi
+}
+
 is_key_plausible() {
     local val="$1"
     [ -z "$val" ] && return 1
@@ -1323,7 +1390,7 @@ print(json.dumps({
                 if echo "$log_output" | grep -q "Successfully processed video: $vid"; then
                     print_ok "Processed: $vid"
                 elif echo "$log_output" | grep -qi "error.*$vid\|failed.*$vid"; then
-                    print_err "Failed: $vid"
+                    print_video_failure_diagnostics "$vid" "$start_time"
                     failed+=("$vid")
                 else
                     new_pending+=("$vid")
@@ -1341,7 +1408,7 @@ print(json.dumps({
             if [ "$status" = "PROCESSED" ]; then
                 print_ok "Processed: $vid"
             elif [ "$status" = "FAILED" ] || [ "$status" = "PERMANENTLY_FAILED" ]; then
-                print_err "Failed: $vid ($status)"
+                print_video_failure_diagnostics "$vid" "$start_time" "$status"
                 failed+=("$vid")
             else
                 after_status+=("$vid")

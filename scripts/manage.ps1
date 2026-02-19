@@ -197,6 +197,93 @@ function Get-VideoProcessingStatus {
     }
 }
 
+function Get-VideoProcessingDetails {
+    param([string]$VideoId)
+    try {
+        $keyJson = "{`"pk`":{`"S`":`"VIDEO#$VideoId`"},`"sk`":{`"S`":`"METADATA`"}}"
+        $item = aws dynamodb get-item `
+            --table-name $Script:TABLE_NAME `
+            --key $keyJson `
+            --consistent-read `
+            --output json 2>$null | ConvertFrom-Json
+
+        if (-not $item -or -not $item.Item) { return $null }
+
+        return [PSCustomObject]@{
+            Status      = $item.Item.status.S
+            FailureReason = $item.Item.failure_reason.S
+            Error       = $item.Item.error.S
+            FailedAt    = $item.Item.failed_at.S
+            NextRetryAt = $item.Item.next_retry_at.S
+        }
+    } catch {
+        return $null
+    }
+}
+
+function Get-ProcessorLogExcerptForVideo {
+    param(
+        [string]$VideoId,
+        [int64]$StartTime,
+        [int]$MaxLines = 8
+    )
+    try {
+        $logGroup = $Script:LOG_GROUPS["processor"]
+        $logs = aws logs filter-log-events `
+            --log-group-name $logGroup `
+            --start-time $StartTime `
+            --output json 2>$null | ConvertFrom-Json
+
+        if (-not $logs -or -not $logs.events) { return @() }
+
+        $matches = @()
+        foreach ($event in $logs.events) {
+            $msg = [string]$event.message
+            if ($msg -and $msg.Contains($VideoId)) {
+                $line = ($msg -replace "`r", " " -replace "`n", " ").Trim()
+                if ($line) { $matches += $line }
+            }
+        }
+
+        if ($matches.Count -eq 0) { return @() }
+        return @($matches | Select-Object -Last $MaxLines)
+    } catch {
+        return @()
+    }
+}
+
+function Write-VideoFailureDiagnostics {
+    param(
+        [string]$VideoId,
+        [int64]$StartTime,
+        [string]$Status = $null
+    )
+
+    $details = Get-VideoProcessingDetails -VideoId $VideoId
+    if (-not $Status -and $details -and $details.Status) { $Status = $details.Status }
+    if (-not $Status) { $Status = "FAILED" }
+
+    Write-Err "Failed: $VideoId ($Status)"
+
+    if ($details) {
+        if ($details.FailureReason) { Write-Inf "Reason: $($details.FailureReason)" }
+        if ($details.Error) {
+            $err = [string]$details.Error
+            if ($err.Length -gt 220) { $err = $err.Substring(0, 217) + "..." }
+            Write-Inf "Error: $err"
+        }
+        if ($details.NextRetryAt) { Write-Inf "Next retry at: $($details.NextRetryAt)" }
+    }
+
+    $lines = Get-ProcessorLogExcerptForVideo -VideoId $VideoId -StartTime $StartTime
+    if ($lines.Count -gt 0) {
+        Write-Host "      Processor log excerpt for $VideoId:" -ForegroundColor DarkCyan
+        foreach ($line in $lines) {
+            Write-Host "      • $line" -ForegroundColor Gray
+        }
+    }
+}
+
 
 # =============================================================================
 # Command: channels
@@ -1203,7 +1290,7 @@ function Invoke-Process {
                         if ($pending.Contains($failedId)) {
                             $pending.Remove($failedId) | Out-Null
                             $failed.Add($failedId) | Out-Null
-                            Write-Err "Failed: $failedId"
+                            Write-VideoFailureDiagnostics -VideoId $failedId -StartTime $startTime
                         }
                     }
                 }
@@ -1220,7 +1307,7 @@ function Invoke-Process {
             } elseif ($status -eq "FAILED" -or $status -eq "PERMANENTLY_FAILED") {
                 $pending.Remove($vid) | Out-Null
                 $failed.Add($vid) | Out-Null
-                Write-Err "Failed: $vid ($status)"
+                Write-VideoFailureDiagnostics -VideoId $vid -StartTime $startTime -Status $status
             }
         }
 
