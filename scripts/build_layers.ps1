@@ -58,11 +58,27 @@ Write-Info "Installing dependencies from: $RequirementsFile"
 # IMPORTANT:
 # - On Windows, the --platform manylinux... install often fails (as expected).
 # - We try it first (useful if pip supports it in your environment), then fallback.
-try {
-    pip install --target $PythonDir --platform manylinux2014_x86_64 --implementation cp --python-version 3.11 --only-binary=:all: -r $RequirementsFile 2>$null
-} catch {
+$installOk = $false
+pip install --target $PythonDir --platform manylinux2014_x86_64 --implementation cp --python-version 3.11 --only-binary=:all: --upgrade -r $RequirementsFile 2>$null
+if ($LASTEXITCODE -eq 0) {
+    $installOk = $true
+} else {
     Write-Warn "Platform-specific install failed; falling back to standard pip install."
-    pip install --target $PythonDir -r $RequirementsFile
+    pip install --target $PythonDir --upgrade -r $RequirementsFile
+    if ($LASTEXITCODE -eq 0) {
+        $installOk = $true
+    }
+}
+
+if (-not $installOk) {
+    Write-ErrorMsg "pip install failed. Could not build Lambda dependencies layer."
+    exit 1
+}
+
+$installedFiles = @(Get-ChildItem -Path $PythonDir -Recurse -File -ErrorAction SilentlyContinue)
+if ($installedFiles.Count -eq 0) {
+    Write-ErrorMsg "No dependencies were installed in layer/python. Build aborted."
+    exit 1
 }
 
 Write-Info "Cleaning up __pycache__ and *.pyc..."
@@ -98,6 +114,7 @@ function New-DeterministicZip {
     $files = Get-ChildItem -Path $SourceDir -Recurse -File -Force |
         ForEach-Object {
             $rel = $_.FullName.Substring($base.Length).TrimStart('\')
+            $rel = $rel -replace '\\', '/'
             [PSCustomObject]@{ Full = $_.FullName; Rel = $rel }
         } | Sort-Object -Property Rel
 
@@ -128,7 +145,29 @@ function New-DeterministicZip {
 }
 
 Write-Info "Creating ZIP archive..."
-New-DeterministicZip -SourceDir $PythonDir -ZipPath $OutputZip -FixedTs $FixedTimestamp
+# IMPORTANT: Python Lambda layers require dependencies under the "python/"
+# prefix inside the ZIP. We zip from $LayerDir (not $PythonDir) to preserve
+# the required folder structure.
+New-DeterministicZip -SourceDir $LayerDir -ZipPath $OutputZip -FixedTs $FixedTimestamp
+
+# Validate ZIP layout: at least one entry must live under "python/".
+$hasPythonPrefix = $false
+$zipRead = [System.IO.Compression.ZipFile]::OpenRead($OutputZip)
+try {
+    foreach ($entry in $zipRead.Entries) {
+        if ($entry.FullName.StartsWith("python/") -or $entry.FullName.StartsWith("python\")) {
+            $hasPythonPrefix = $true
+            break
+        }
+    }
+} finally {
+    $zipRead.Dispose()
+}
+
+if (-not $hasPythonPrefix) {
+    Write-ErrorMsg "Invalid layer ZIP layout: missing 'python/' prefix. Build aborted."
+    exit 1
+}
 
 $hash = (Get-FileHash $OutputZip -Algorithm SHA256).Hash
 $sizeKb = [math]::Round(((Get-Item $OutputZip).Length / 1KB), 2)

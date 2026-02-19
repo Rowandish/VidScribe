@@ -53,3 +53,13 @@ Raccoglitore delle informazioni apprese durante il lavoro sul progetto.
 - Contesto: errore parser in `manage.ps1` su stringa `"Processor log excerpt for $VideoId:"`.
 - Apprendimento: in stringhe double-quoted, una variabile seguita subito da `:` puo essere interpretata come reference non valida; usare `${VideoId}:` evita l'ambiguita.
 - Impatto: nei messaggi interpolati con suffissi `:` usare delimitazione `${...}` per evitare errori runtime.
+
+### 2026-02-19 - Processor log debug should use filter pattern and recent fallback
+- Contesto: in alcuni failure `process` mostrava reason/error da DynamoDB ma non righe log correlate al `video_id`.
+- Apprendimento: query CloudWatch non filtrate su log group molto attivi possono non restituire subito eventi rilevanti; il filtro per `video_id` e un fallback "recent logs" migliorano osservabilita.
+- Impatto: su failure, il comando deve prima cercare log per `video_id` e, se assenti, mostrare comunque le ultime righe processor per accelerare il troubleshooting.
+
+### 2026-02-19 - Windows layer build must preserve `python/` prefix in ZIP
+- Contesto: errore runtime Lambda `youtube-transcript-api not available` nonostante dipendenza presente nello zip layer.
+- Apprendimento: `build_layers.ps1` zippava il contenuto di `layer/python` a root, ma Lambda Python layer richiede file sotto `python/`.
+- Impatto: il build script PowerShell deve zippare da `layer/` e validare la presenza del prefisso `python/` per evitare layer non importabili.

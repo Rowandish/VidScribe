@@ -231,7 +231,9 @@ function Get-ProcessorLogExcerptForVideo {
         $logGroup = $Script:LOG_GROUPS["processor"]
         $logs = aws logs filter-log-events `
             --log-group-name $logGroup `
+            --filter-pattern $VideoId `
             --start-time $StartTime `
+            --limit ([Math]::Max($MaxLines * 8, 40)) `
             --output json 2>$null | ConvertFrom-Json
 
         if (-not $logs -or -not $logs.events) { return @() }
@@ -247,6 +249,38 @@ function Get-ProcessorLogExcerptForVideo {
 
         if ($matches.Count -eq 0) { return @() }
         return @($matches | Select-Object -Last $MaxLines)
+    } catch {
+        return @()
+    }
+}
+
+function Get-ProcessorRecentLogExcerpt {
+    param(
+        [int64]$StartTime,
+        [int]$MaxLines = 8
+    )
+    try {
+        $logGroup = $Script:LOG_GROUPS["processor"]
+        $recentStart = [Math]::Max(0, ($StartTime - 900000))
+        $logs = aws logs filter-log-events `
+            --log-group-name $logGroup `
+            --start-time $recentStart `
+            --limit ([Math]::Max($MaxLines * 6, 30)) `
+            --output json 2>$null | ConvertFrom-Json
+
+        if (-not $logs -or -not $logs.events) { return @() }
+
+        $lines = @()
+        foreach ($event in $logs.events) {
+            $msg = [string]$event.message
+            if ($msg) {
+                $line = ($msg -replace "`r", " " -replace "`n", " ").Trim()
+                if ($line) { $lines += $line }
+            }
+        }
+
+        if ($lines.Count -eq 0) { return @() }
+        return @($lines | Select-Object -Last $MaxLines)
     } catch {
         return @()
     }
@@ -280,6 +314,16 @@ function Write-VideoFailureDiagnostics {
         Write-Host "      Processor log excerpt for ${VideoId}:" -ForegroundColor DarkCyan
         foreach ($line in $lines) {
             Write-Host "      • $line" -ForegroundColor Gray
+        }
+    } else {
+        $recentLines = Get-ProcessorRecentLogExcerpt -StartTime $StartTime
+        if ($recentLines.Count -gt 0) {
+            Write-Host "      Recent processor logs (no direct match for ${VideoId}):" -ForegroundColor DarkCyan
+            foreach ($line in $recentLines) {
+                Write-Host "      • $line" -ForegroundColor Gray
+            }
+        } else {
+            Write-Inf "No processor log lines found yet for $VideoId (possible CloudWatch ingestion delay)."
         }
     }
 }

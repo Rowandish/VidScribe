@@ -215,11 +215,32 @@ get_processor_log_excerpt_for_video() {
     local processor_log_group="${LOG_GROUPS[processor]}"
     aws logs filter-log-events \
         --log-group-name "$processor_log_group" \
+        --filter-pattern "$video_id" \
         --start-time "$start_time" \
+        --limit "$((max_lines * 8))" \
         --output json 2>/dev/null | python3 -c "import sys,json; vid='$video_id'; max_lines=$max_lines; d=json.load(sys.stdin); lines=[]; 
 for e in d.get('events', []):
     m=str(e.get('message','')).replace('\\r',' ').replace('\\n',' ').strip()
     if vid in m and m:
+        lines.append(m)
+for line in lines[-max_lines:]:
+    print(line)" 2>/dev/null || true
+}
+
+get_processor_recent_log_excerpt() {
+    local start_time="$1"
+    local max_lines="${2:-8}"
+    local processor_log_group="${LOG_GROUPS[processor]}"
+    local recent_start=$((start_time - 900000))
+    [ "$recent_start" -lt 0 ] && recent_start=0
+    aws logs filter-log-events \
+        --log-group-name "$processor_log_group" \
+        --start-time "$recent_start" \
+        --limit "$((max_lines * 6))" \
+        --output json 2>/dev/null | python3 -c "import sys,json; max_lines=$max_lines; d=json.load(sys.stdin); lines=[]; 
+for e in d.get('events', []):
+    m=str(e.get('message','')).replace('\\r',' ').replace('\\n',' ').strip()
+    if m:
         lines.append(m)
 for line in lines[-max_lines:]:
     print(line)" 2>/dev/null || true
@@ -261,6 +282,18 @@ print_video_failure_diagnostics() {
             [ -z "$line" ] && continue
             echo -e "      ${GRAY}• $line${NC}"
         done <<< "$excerpt"
+    else
+        local recent_excerpt
+        recent_excerpt=$(get_processor_recent_log_excerpt "$start_time" "8")
+        if [ -n "$recent_excerpt" ]; then
+            echo -e "      ${DARK_CYAN}Recent processor logs (no direct match for $video_id):${NC}"
+            while IFS= read -r line; do
+                [ -z "$line" ] && continue
+                echo -e "      ${GRAY}• $line${NC}"
+            done <<< "$recent_excerpt"
+        else
+            print_inf "No processor log lines found yet for $video_id (possible CloudWatch ingestion delay)."
+        fi
     fi
 }
 
