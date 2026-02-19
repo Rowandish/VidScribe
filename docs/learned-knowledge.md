@@ -98,3 +98,8 @@ Raccoglitore delle informazioni apprese durante il lavoro sul progetto.
 - Contesto: `manage.ps1 deploy` falliva con `Backend configuration changed` dopo migrazione backend a `use_lockfile`.
 - Apprendimento: quando il backend block cambia, `terraform init` standard non basta; serve `-reconfigure` (o `-migrate-state` nei casi di migrazione stato).
 - Impatto: gli script deploy devono usare `terraform init -reconfigure` per evitare interruzioni operative su aggiornamenti backend non distruttivi.
+
+### 2026-02-19 - `-reconfigure` should be manual, not default in routine deploys
+- Contesto: dopo aver messo `terraform init -reconfigure` come default in deploy, Terraform richiedeva ogni volta `bucket` e `region` backend-config.
+- Apprendimento: `-reconfigure` forza la riconfigurazione backend e rompe il flusso "init una volta, deploy sempre"; va usato solo quando il backend cambia davvero.
+- Impatto: negli script deploy il default deve restare `terraform init`; in caso di backend change, eseguire `terraform init -reconfigure` manualmente una tantum.

@@ -1179,8 +1179,8 @@ function Invoke-Deploy {
             throw "Layer build failed with exit code $LASTEXITCODE"
         }
 
-        Write-Inf "Initializing Terraform (reconfigure backend)..."
-        terraform init -reconfigure
+        Write-Inf "Initializing Terraform..."
+        terraform init
         
         Write-Inf "Planning deployment..."
         terraform plan -out=tfplan
