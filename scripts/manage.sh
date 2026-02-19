@@ -213,37 +213,16 @@ get_processor_log_excerpt_for_video() {
     local start_time="$2"
     local max_lines="${3:-8}"
     local processor_log_group="${LOG_GROUPS[processor]}"
-    aws logs filter-log-events \
-        --log-group-name "$processor_log_group" \
-        --filter-pattern "$video_id" \
-        --start-time "$start_time" \
-        --limit "$((max_lines * 8))" \
-        --output json 2>/dev/null | python3 -c "import sys,json; vid='$video_id'; max_lines=$max_lines; d=json.load(sys.stdin); lines=[]; 
-for e in d.get('events', []):
-    m=str(e.get('message','')).replace('\\r',' ').replace('\\n',' ').strip()
-    if vid in m and m:
-        lines.append(m)
-for line in lines[-max_lines:]:
-    print(line)" 2>/dev/null || true
+    aws logs tail "$processor_log_group" --since "30m" --format short 2>/dev/null | \
+        grep -F "$video_id" | tail -n "$max_lines" || true
 }
 
 get_processor_recent_log_excerpt() {
     local start_time="$1"
     local max_lines="${2:-8}"
     local processor_log_group="${LOG_GROUPS[processor]}"
-    local recent_start=$((start_time - 900000))
-    [ "$recent_start" -lt 0 ] && recent_start=0
-    aws logs filter-log-events \
-        --log-group-name "$processor_log_group" \
-        --start-time "$recent_start" \
-        --limit "$((max_lines * 6))" \
-        --output json 2>/dev/null | python3 -c "import sys,json; max_lines=$max_lines; d=json.load(sys.stdin); lines=[]; 
-for e in d.get('events', []):
-    m=str(e.get('message','')).replace('\\r',' ').replace('\\n',' ').strip()
-    if m:
-        lines.append(m)
-for line in lines[-max_lines:]:
-    print(line)" 2>/dev/null || true
+    aws logs tail "$processor_log_group" --since "15m" --format short 2>/dev/null | \
+        tail -n "$max_lines" || true
 }
 
 print_video_failure_diagnostics() {

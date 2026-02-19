@@ -68,3 +68,13 @@ Raccoglitore delle informazioni apprese durante il lavoro sul progetto.
 - Contesto: failure reason in DynamoDB mostrava `NO_TRANSCRIPT` anche quando il vero problema era `youtube-transcript-api not available`.
 - Apprendimento: assenza della libreria runtime e transcript non disponibile sono condizioni diverse e richiedono remediation diverse.
 - Impatto: il processor deve classificare il caso come `DEPENDENCY_MISSING` per rendere immediata la diagnosi operativa.
+
+### 2026-02-19 - Process diagnostics align better with `aws logs tail` than filter queries
+- Contesto: `manage.ps1 process` non mostrava estratti log in alcuni failure, mentre `aws logs tail ... --follow` mostrava eventi correttamente.
+- Apprendimento: per troubleshooting operativo, l'output di `aws logs tail` e spesso piu affidabile/leggibile di query `filter-log-events` customizzate su log group attivi.
+- Impatto: la diagnostica failure di `process` deve leggere i log via `aws logs tail` e filtrare localmente per `video_id`, con fallback alle ultime righe recenti.
+
+### 2026-02-19 - Newsletter Markdown must degrade gracefully without external parser
+- Contesto: alcune email mostravano testo Markdown raw perche il modulo `markdown` non era disponibile nel runtime.
+- Apprendimento: senza dipendenze aggiuntive, serve un renderer fallback per heading/liste/bold/italic/link/code.
+- Impatto: il formatter newsletter deve includere parser Markdown minimale lato stdlib per mantenere leggibilita HTML anche in ambienti ridotti.

@@ -78,6 +78,30 @@ class TestNewsletterLambda:
         assert "<p>First paragraph.</p>" in result
         assert "<p>Second paragraph.</p>" in result
         assert "<p>Third paragraph.</p>" in result
+
+    def test_format_summary_html_markdown_fallback(self):
+        """Test fallback markdown rendering when python-markdown is unavailable."""
+        import src.newsletter.handler as newsletter_handler
+
+        text = (
+            "# Title\n\n"
+            "- **Key point** with [link](https://example.com)\n"
+            "- Second item\n\n"
+            "1. First ordered\n"
+            "2. Second ordered\n\n"
+            "Use `code` and *emphasis*."
+        )
+
+        with patch.object(newsletter_handler, "markdown", None):
+            result = newsletter_handler.format_summary_html(text)
+
+        assert "<h1>Title</h1>" in result
+        assert "<ul>" in result and "</ul>" in result
+        assert "<ol>" in result and "</ol>" in result
+        assert "<strong>Key point</strong>" in result
+        assert '<a href="https://example.com">link</a>' in result
+        assert "<code>code</code>" in result
+        assert "<em>emphasis</em>" in result
     
     def test_format_date_valid(self):
         """Test date formatting with valid ISO date."""

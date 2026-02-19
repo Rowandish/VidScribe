@@ -229,24 +229,11 @@ function Get-ProcessorLogExcerptForVideo {
     )
     try {
         $logGroup = $Script:LOG_GROUPS["processor"]
-        $logs = aws logs filter-log-events `
-            --log-group-name $logGroup `
-            --filter-pattern $VideoId `
-            --start-time $StartTime `
-            --limit ([Math]::Max($MaxLines * 8, 40)) `
-            --output json 2>$null | ConvertFrom-Json
+        $tailLines = aws logs tail $logGroup --since "30m" --format short 2>$null
 
-        if (-not $logs -or -not $logs.events) { return @() }
+        if (-not $tailLines) { return @() }
 
-        $matches = @()
-        foreach ($event in $logs.events) {
-            $msg = [string]$event.message
-            if ($msg -and $msg.Contains($VideoId)) {
-                $line = ($msg -replace "`r", " " -replace "`n", " ").Trim()
-                if ($line) { $matches += $line }
-            }
-        }
-
+        $matches = @($tailLines | Where-Object { $_ -and $_.ToString().Contains($VideoId) })
         if ($matches.Count -eq 0) { return @() }
         return @($matches | Select-Object -Last $MaxLines)
     } catch {
@@ -261,26 +248,9 @@ function Get-ProcessorRecentLogExcerpt {
     )
     try {
         $logGroup = $Script:LOG_GROUPS["processor"]
-        $recentStart = [Math]::Max(0, ($StartTime - 900000))
-        $logs = aws logs filter-log-events `
-            --log-group-name $logGroup `
-            --start-time $recentStart `
-            --limit ([Math]::Max($MaxLines * 6, 30)) `
-            --output json 2>$null | ConvertFrom-Json
-
-        if (-not $logs -or -not $logs.events) { return @() }
-
-        $lines = @()
-        foreach ($event in $logs.events) {
-            $msg = [string]$event.message
-            if ($msg) {
-                $line = ($msg -replace "`r", " " -replace "`n", " ").Trim()
-                if ($line) { $lines += $line }
-            }
-        }
-
-        if ($lines.Count -eq 0) { return @() }
-        return @($lines | Select-Object -Last $MaxLines)
+        $tailLines = aws logs tail $logGroup --since "15m" --format short 2>$null
+        if (-not $tailLines) { return @() }
+        return @($tailLines | Select-Object -Last $MaxLines)
     } catch {
         return @()
     }

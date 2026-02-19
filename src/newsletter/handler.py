@@ -14,7 +14,9 @@ Note: Both sender and recipient emails must be verified in SES sandbox mode.
 import json
 import logging
 import os
+import re
 from datetime import datetime, timedelta, timezone
+from html import escape
 from typing import Any
 
 import boto3
@@ -374,19 +376,97 @@ def format_summary_html(summary_text: str) -> str:
     if markdown:
         # Convert markdown to HTML
         return markdown.markdown(summary_text)
-    
-    # Fallback if markdown library is missing
-    # Split by double newlines or single newlines
-    paragraphs = summary_text.strip().split("\n\n")
-    if len(paragraphs) == 1:
-        paragraphs = summary_text.strip().split("\n")
-    
-    html_parts = []
-    for p in paragraphs:
-        p = p.strip()
-        if p:
-            html_parts.append(f"<p>{p}</p>")
-    return "\n".join(html_parts)
+
+    # Fallback if markdown library is missing: render a safe Markdown subset
+    return markdown_to_html_fallback(summary_text)
+
+
+def format_inline_markdown(text: str) -> str:
+    """Render a minimal safe subset of inline markdown syntax."""
+    safe = escape(text)
+
+    # Inline code first to avoid style substitutions inside it.
+    safe = re.sub(r"`([^`]+)`", r"<code>\1</code>", safe)
+    safe = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", safe)
+    safe = re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", r"<em>\1</em>", safe)
+    safe = re.sub(r"\[([^\]]+)\]\((https?://[^\s)]+)\)", r'<a href="\2">\1</a>', safe)
+    return safe
+
+
+def markdown_to_html_fallback(summary_text: str) -> str:
+    """Render block-level Markdown when python-markdown is not available."""
+    if not summary_text or not summary_text.strip():
+        return "<p>No summary available.</p>"
+
+    lines = summary_text.strip().splitlines()
+    html_parts: list[str] = []
+    paragraph_lines: list[str] = []
+    ul_items: list[str] = []
+    ol_items: list[str] = []
+
+    def flush_paragraph() -> None:
+        if paragraph_lines:
+            paragraph_text = " ".join(paragraph_lines).strip()
+            if paragraph_text:
+                html_parts.append(f"<p>{format_inline_markdown(paragraph_text)}</p>")
+            paragraph_lines.clear()
+
+    def flush_lists() -> None:
+        if ul_items:
+            html_parts.append("<ul>")
+            for item in ul_items:
+                html_parts.append(f"<li>{format_inline_markdown(item)}</li>")
+            html_parts.append("</ul>")
+            ul_items.clear()
+        if ol_items:
+            html_parts.append("<ol>")
+            for item in ol_items:
+                html_parts.append(f"<li>{format_inline_markdown(item)}</li>")
+            html_parts.append("</ol>")
+            ol_items.clear()
+
+    for raw_line in lines:
+        line = raw_line.strip()
+
+        if not line:
+            flush_paragraph()
+            flush_lists()
+            continue
+
+        heading_match = re.match(r"^(#{1,6})\s+(.+)$", line)
+        if heading_match:
+            flush_paragraph()
+            flush_lists()
+            level = min(len(heading_match.group(1)), 6)
+            text = format_inline_markdown(heading_match.group(2).strip())
+            html_parts.append(f"<h{level}>{text}</h{level}>")
+            continue
+
+        ul_match = re.match(r"^[-*]\s+(.+)$", line)
+        if ul_match:
+            flush_paragraph()
+            if ol_items:
+                flush_lists()
+            ul_items.append(ul_match.group(1).strip())
+            continue
+
+        ol_match = re.match(r"^\d+\.\s+(.+)$", line)
+        if ol_match:
+            flush_paragraph()
+            if ul_items:
+                flush_lists()
+            ol_items.append(ol_match.group(1).strip())
+            continue
+
+        if ul_items or ol_items:
+            flush_lists()
+
+        paragraph_lines.append(line)
+
+    flush_paragraph()
+    flush_lists()
+
+    return "\n".join(html_parts) if html_parts else "<p>No summary available.</p>"
 
 
 def format_date(iso_date: str) -> str:
