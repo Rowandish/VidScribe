@@ -343,24 +343,77 @@ def get_weekly_summaries(table) -> list[dict]:
     logger.info(f"Querying summaries from {week_ago_iso} to now")
     
     try:
-        response = table.query(
-            IndexName="GSI1",
-            KeyConditionExpression="gsi1pk = :pk AND gsi1sk >= :start_date",
-            ExpressionAttributeValues={
+        summaries: list[dict] = []
+        query_kwargs = {
+            "IndexName": "GSI1",
+            "KeyConditionExpression": "gsi1pk = :pk AND gsi1sk >= :start_date",
+            "FilterExpression": "attribute_not_exists(newsletter_sent_at)",
+            "ExpressionAttributeValues": {
                 ":pk": "SUMMARY",
                 ":start_date": week_ago_iso
             },
-            ScanIndexForward=False  # Newest first
-        )
-        
-        summaries = response.get("Items", [])
-        logger.info(f"Found {len(summaries)} summaries")
-        
+            "ScanIndexForward": False  # Newest first
+        }
+
+        while True:
+            response = table.query(**query_kwargs)
+            summaries.extend(response.get("Items", []))
+
+            last_key = response.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            query_kwargs["ExclusiveStartKey"] = last_key
+
+        logger.info(f"Found {len(summaries)} unsent summaries")
         return summaries
         
     except ClientError as e:
         logger.error(f"Error querying summaries: {e}")
         return []
+
+
+def mark_summaries_sent(table, summaries: list[dict]) -> dict:
+    """
+    Mark summary records as sent so they are included in newsletters only once.
+
+    Args:
+        table: DynamoDB table resource
+        summaries: Summaries successfully sent in email
+
+    Returns:
+        Dict with marking statistics.
+    """
+    stats = {"marked": 0, "errors": 0}
+    sent_at = datetime.now(timezone.utc).isoformat()
+
+    for summary in summaries:
+        video_id = summary.get("video_id")
+        if not video_id:
+            stats["errors"] += 1
+            continue
+
+        try:
+            table.update_item(
+                Key={
+                    "pk": f"SUMMARY#{video_id}",
+                    "sk": "DATA"
+                },
+                UpdateExpression=(
+                    "SET newsletter_sent_at = if_not_exists(newsletter_sent_at, :sent_at), "
+                    "newsletter_sent_count = if_not_exists(newsletter_sent_count, :zero) + :one"
+                ),
+                ExpressionAttributeValues={
+                    ":sent_at": sent_at,
+                    ":zero": 0,
+                    ":one": 1
+                }
+            )
+            stats["marked"] += 1
+        except ClientError as e:
+            logger.error(f"Failed to mark summary as sent for video {video_id}: {e}")
+            stats["errors"] += 1
+
+    return stats
 
 
 def format_summary_html(summary_text: str) -> str:
@@ -675,11 +728,19 @@ def lambda_handler(event: dict, context: Any) -> dict:
             )
         
         if success:
+            mark_stats = mark_summaries_sent(table, summaries)
+            if mark_stats["errors"] > 0:
+                logger.warning(
+                    f"Newsletter sent but failed to mark {mark_stats['errors']} summary record(s) as sent"
+                )
+
             return {
                 "statusCode": 200,
                 "body": json.dumps({
                     "message": "Newsletter sent successfully",
                     "summaries_count": len(summaries),
+                    "summaries_marked_sent": mark_stats["marked"],
+                    "mark_errors": mark_stats["errors"],
                     "recipient": destination_email
                 })
             }

@@ -88,3 +88,8 @@ Raccoglitore delle informazioni apprese durante il lavoro sul progetto.
 - Contesto: warning in `terraform apply` su parametro backend deprecato `dynamodb_table`.
 - Apprendimento: il backend S3 moderno usa `use_lockfile=true`; mantenere `dynamodb_table` produce warning di deprecazione.
 - Impatto: aggiornare esempi/backend config in `infra/backend.tf`, `infra/bootstrap/main.tf`, `scripts/setup.ps1`, `scripts/setup.sh` per evitare warning e allineare i nuovi deploy.
+
+### 2026-02-19 - Newsletter must send each summary once via `newsletter_sent_at` tracking
+- Contesto: lo stesso video appariva in newsletter successive quando il job girava piu volte nella finestra degli ultimi 7 giorni.
+- Apprendimento: la query newsletter filtrava solo per data (`gsi1sk >= week_ago`) senza stato di invio.
+- Impatto: dopo invio riuscito, i summary vanno marcati con `newsletter_sent_at` (e counter) e la query deve escludere i gia inviati.

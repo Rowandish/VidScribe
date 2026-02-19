@@ -58,6 +58,37 @@ class TestNewsletterLambda:
         
         # Should not include the old summary
         assert len(summaries) == 0
+
+    @mock_aws
+    def test_get_weekly_summaries_excludes_already_sent(self, dynamodb_table, sample_summary):
+        """Sent summaries must not be included again in future newsletters."""
+        from src.newsletter.handler import get_weekly_summaries
+
+        sent_summary = sample_summary.copy()
+        sent_summary["newsletter_sent_at"] = datetime.now(timezone.utc).isoformat()
+        dynamodb_table.put_item(Item=sent_summary)
+
+        summaries = get_weekly_summaries(dynamodb_table)
+        assert summaries == []
+
+    @mock_aws
+    def test_mark_summaries_sent(self, dynamodb_table, sample_summary):
+        """Mark summaries as sent after successful delivery."""
+        from src.newsletter.handler import mark_summaries_sent
+
+        dynamodb_table.put_item(Item=sample_summary)
+
+        stats = mark_summaries_sent(dynamodb_table, [sample_summary])
+
+        assert stats["marked"] == 1
+        assert stats["errors"] == 0
+
+        response = dynamodb_table.get_item(
+            Key={"pk": sample_summary["pk"], "sk": sample_summary["sk"]}
+        )
+        item = response["Item"]
+        assert "newsletter_sent_at" in item
+        assert item["newsletter_sent_count"] == 1
     
     def test_format_summary_html_single_paragraph(self):
         """Test HTML formatting with a single paragraph."""
