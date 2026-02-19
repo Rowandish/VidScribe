@@ -186,6 +186,17 @@ extract_video_id() {
     echo "${vid:-$url}"
 }
 
+get_video_processing_status() {
+    local video_id="$1"
+    local key_json
+    key_json="{\"pk\":{\"S\":\"VIDEO#${video_id}\"},\"sk\":{\"S\":\"METADATA\"}}"
+    aws dynamodb get-item \
+        --table-name "$TABLE_NAME" \
+        --key "$key_json" \
+        --consistent-read \
+        --output json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('Item',{}).get('status',{}).get('S',''))" 2>/dev/null || echo ""
+}
+
 is_key_plausible() {
     local val="$1"
     [ -z "$val" ] && return 1
@@ -1291,6 +1302,7 @@ print(json.dumps({
     echo -e "    ${YELLOW}⏳ ${WHITE}Waiting for processing (max ${wait_timeout}s)${NC}"
 
     local pending=("${video_ids[@]}")
+    local failed=()
     local elapsed=0
     local poll_interval=5
     local processor_log_group="${LOG_GROUPS[processor]}"
@@ -1312,12 +1324,30 @@ print(json.dumps({
                     print_ok "Processed: $vid"
                 elif echo "$log_output" | grep -qi "error.*$vid\|failed.*$vid"; then
                     print_err "Failed: $vid"
+                    failed+=("$vid")
                 else
                     new_pending+=("$vid")
                 fi
             done
             pending=("${new_pending[@]}")
         fi
+
+        # Fallback to DynamoDB status to avoid false 300s waits when processor
+        # completes with non-success logs (e.g. FAILED/PERMANENTLY_FAILED).
+        local after_status=()
+        for vid in "${pending[@]}"; do
+            local status
+            status=$(get_video_processing_status "$vid")
+            if [ "$status" = "PROCESSED" ]; then
+                print_ok "Processed: $vid"
+            elif [ "$status" = "FAILED" ] || [ "$status" = "PERMANENTLY_FAILED" ]; then
+                print_err "Failed: $vid ($status)"
+                failed+=("$vid")
+            else
+                after_status+=("$vid")
+            fi
+        done
+        pending=("${after_status[@]}")
 
         echo -n "."
     done
@@ -1326,6 +1356,8 @@ print(json.dumps({
     if [ ${#pending[@]} -gt 0 ]; then
         print_warn "Timeout! Still pending: ${pending[*]}"
         print_inf "Videos may still be processing. Check: ./manage.sh logs processor"
+    elif [ ${#failed[@]} -gt 0 ]; then
+        print_warn "Completed with failures: ${failed[*]}"
     else
         print_ok "All videos processed!"
     fi

@@ -181,6 +181,22 @@ function Extract-VideoId {
     return $Url
 }
 
+function Get-VideoProcessingStatus {
+    param([string]$VideoId)
+    try {
+        $keyJson = "{`"pk`":{`"S`":`"VIDEO#$VideoId`"},`"sk`":{`"S`":`"METADATA`"}}"
+        $item = aws dynamodb get-item `
+            --table-name $Script:TABLE_NAME `
+            --key $keyJson `
+            --consistent-read `
+            --output json 2>$null | ConvertFrom-Json
+
+        return $item.Item.status.S
+    } catch {
+        return $null
+    }
+}
+
 
 # =============================================================================
 # Command: channels
@@ -1157,6 +1173,7 @@ function Invoke-Process {
     Write-Host "Waiting for processing (max ${waitTimeout}s)" -ForegroundColor White
 
     $pending = [System.Collections.Generic.HashSet[string]]::new([string[]]$videoIds)
+    $failed = [System.Collections.Generic.HashSet[string]]::new()
     $elapsed = 0
     $pollInterval = 5
     $processorLogGroup = $Script:LOG_GROUPS["processor"]
@@ -1185,12 +1202,27 @@ function Invoke-Process {
                         $failedId = $Matches[1]
                         if ($pending.Contains($failedId)) {
                             $pending.Remove($failedId) | Out-Null
+                            $failed.Add($failedId) | Out-Null
                             Write-Err "Failed: $failedId"
                         }
                     }
                 }
             }
         } catch { }
+
+        # Fallback to DynamoDB status to avoid false 300s waits when processor
+        # completes with non-success logs (e.g. FAILED/PERMANENTLY_FAILED).
+        foreach ($vid in @($pending)) {
+            $status = Get-VideoProcessingStatus -VideoId $vid
+            if ($status -eq "PROCESSED") {
+                $pending.Remove($vid) | Out-Null
+                Write-OK "Processed: $vid"
+            } elseif ($status -eq "FAILED" -or $status -eq "PERMANENTLY_FAILED") {
+                $pending.Remove($vid) | Out-Null
+                $failed.Add($vid) | Out-Null
+                Write-Err "Failed: $vid ($status)"
+            }
+        }
 
         Write-Host "." -NoNewline -ForegroundColor DarkGray
     }
@@ -1199,6 +1231,8 @@ function Invoke-Process {
     if ($pending.Count -gt 0) {
         Write-Warn "Timeout! Still pending: $($pending -join ', ')"
         Write-Inf "Videos may still be processing. Check: .\manage.ps1 logs processor"
+    } elseif ($failed.Count -gt 0) {
+        Write-Warn "Completed with failures: $($failed -join ', ')"
     } else {
         Write-OK "All videos processed!"
     }

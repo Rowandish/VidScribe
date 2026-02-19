@@ -38,3 +38,8 @@ Raccoglitore delle informazioni apprese durante il lavoro sul progetto.
 - Contesto: segnalazione che `manage.ps1 info` mostrava "Webshare proxy selected but credentials not set" anche con credenziali presenti.
 - Apprendimento: la validazione proxy usava il controllo `api key plausible` (minimo 10 caratteri), causando falsi negativi per username/password validi ma piu corti.
 - Impatto: per proxy Webshare/generic bisogna validare solo "valore configurato/non placeholder", non la lunghezza tipica delle API key.
+
+### 2026-02-19 - Manual process monitoring must check DynamoDB status, not logs only
+- Contesto: `manage.ps1 process` restava in attesa fino al timeout di 300 secondi anche quando il processor aveva gia concluso.
+- Apprendimento: il monitoraggio basato solo su pattern nei log non copre alcuni esiti validi (es. `FAILED`/`PERMANENTLY_FAILED` senza log "success"), causando pending falsi.
+- Impatto: per evitare timeout inutili, il monitoraggio deve usare anche lo stato DynamoDB `VIDEO#{video_id}/METADATA.status` come source of truth.
