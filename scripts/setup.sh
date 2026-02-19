@@ -167,7 +167,7 @@ main() {
     echo "   cd infra"
     echo "   terraform init \\"
     echo "     -backend-config=\"bucket=$BUCKET_NAME\" \\"
-    echo "     -backend-config=\"dynamodb_table=$DYNAMODB_TABLE\" \\"
+    echo "     -backend-config=\"use_lockfile=true\" \\"
     echo "     -backend-config=\"region=$AWS_REGION\""
     echo ""
     echo "   terraform plan"

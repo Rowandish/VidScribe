@@ -83,3 +83,8 @@ Raccoglitore delle informazioni apprese durante il lavoro sul progetto.
 - Contesto: errore runtime `Error getting transcript ... 'dict' object has no attribute 'to_requests_dict'`.
 - Apprendimento: con le versioni recenti della libreria, `YouTubeTranscriptApi(proxy_config=...)` richiede `WebshareProxyConfig` o `GenericProxyConfig`.
 - Impatto: il processor deve costruire proxy object tipizzati in `get_proxy_config` per evitare failure immediato su tutte le trascrizioni proxate.
+
+### 2026-02-19 - Terraform S3 backend lock should use `use_lockfile` instead of `dynamodb_table`
+- Contesto: warning in `terraform apply` su parametro backend deprecato `dynamodb_table`.
+- Apprendimento: il backend S3 moderno usa `use_lockfile=true`; mantenere `dynamodb_table` produce warning di deprecazione.
+- Impatto: aggiornare esempi/backend config in `infra/backend.tf`, `infra/bootstrap/main.tf`, `scripts/setup.ps1`, `scripts/setup.sh` per evitare warning e allineare i nuovi deploy.

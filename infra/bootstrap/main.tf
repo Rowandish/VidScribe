@@ -194,11 +194,11 @@ output "backend_config" {
     
     terraform {
       backend "s3" {
-        bucket         = "${aws_s3_bucket.terraform_state.id}"
-        key            = "vidscribe/terraform.tfstate"
-        region         = "${var.aws_region}"
-        dynamodb_table = "${aws_dynamodb_table.terraform_lock.name}"
-        encrypt        = true
+        bucket       = "${aws_s3_bucket.terraform_state.id}"
+        key          = "vidscribe/terraform.tfstate"
+        region       = "${var.aws_region}"
+        use_lockfile = true
+        encrypt      = true
       }
     }
   EOT
