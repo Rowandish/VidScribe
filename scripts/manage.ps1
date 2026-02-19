@@ -277,7 +277,7 @@ function Write-VideoFailureDiagnostics {
 
     $lines = Get-ProcessorLogExcerptForVideo -VideoId $VideoId -StartTime $StartTime
     if ($lines.Count -gt 0) {
-        Write-Host "      Processor log excerpt for $VideoId:" -ForegroundColor DarkCyan
+        Write-Host "      Processor log excerpt for ${VideoId}:" -ForegroundColor DarkCyan
         foreach ($line in $lines) {
             Write-Host "      • $line" -ForegroundColor Gray
         }

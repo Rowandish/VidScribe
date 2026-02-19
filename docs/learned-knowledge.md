@@ -48,3 +48,8 @@ Raccoglitore delle informazioni apprese durante il lavoro sul progetto.
 - Contesto: durante `manage.ps1 process` compariva solo `Failed: <video_id> (FAILED)` senza indicazioni utili per debug.
 - Apprendimento: il motivo di failure vive nel record DynamoDB (`failure_reason`, `error`, `next_retry_at`) e i log processor filtrati per `video_id` aiutano a capire il punto esatto di rottura.
 - Impatto: su failure, `process` deve stampare motivazione sintetica e alcune righe log correlate per ridurre il tempo di diagnosi.
+
+### 2026-02-19 - PowerShell interpolation with trailing colon needs `${var}` syntax
+- Contesto: errore parser in `manage.ps1` su stringa `"Processor log excerpt for $VideoId:"`.
+- Apprendimento: in stringhe double-quoted, una variabile seguita subito da `:` puo essere interpretata come reference non valida; usare `${VideoId}:` evita l'ambiguita.
+- Impatto: nei messaggi interpolati con suffissi `:` usare delimitazione `${...}` per evitare errori runtime.
