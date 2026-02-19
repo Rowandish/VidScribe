@@ -651,6 +651,7 @@ cmd_apikeys() {
             if [ -n "$user" ] && [ -n "$pass" ]; then
                 set_ssm_value "webshare_username" "$user"
                 set_ssm_value "webshare_password" "$pass" "SecureString"
+                set_ssm_value "proxy_type" "webshare"
                 print_ok "Webshare credentials updated"
             fi
             ;;

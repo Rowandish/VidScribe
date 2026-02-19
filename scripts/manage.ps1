@@ -673,6 +673,7 @@ function Invoke-ApiKeys {
             if ($user -and $pass) {
                 Set-SSMValue -Name "webshare_username" -Value $user
                 Set-SSMValue -Name "webshare_password" -Value $pass -Type "SecureString"
+                Set-SSMValue -Name "proxy_type" -Value "webshare"
                 Write-OK "Webshare credentials updated"
             }
         }

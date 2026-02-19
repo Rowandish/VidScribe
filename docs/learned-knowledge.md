@@ -28,3 +28,8 @@ Raccoglitore delle informazioni apprese durante il lavoro sul progetto.
 - Contesto: richiesta di tradurre completamente `AGENTS.md` in inglese.
 - Apprendimento: questo repository ora adotta AGENTS come documento operativo in lingua inglese.
 - Impatto: nuove regole/processo vanno mantenute e aggiornate in inglese per coerenza operativa.
+
+### 2026-02-19 - API keys Webshare must also set proxy type
+- Contesto: debug di `scripts/manage.ps1 apikeys` e `scripts/manage.sh apikeys` dopo segnalazione che `info` mostrava proxy non configurato.
+- Apprendimento: aggiornare solo `webshare_username/password` non basta; `info` e runtime dipendono da `proxy_type`.
+- Impatto: quando si impostano credenziali Webshare da wizard, va scritto anche `proxy_type=webshare` per evitare stato incoerente.
