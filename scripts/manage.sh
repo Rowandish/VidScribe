@@ -195,6 +195,14 @@ is_key_plausible() {
     return 0
 }
 
+is_value_configured() {
+    local val="$1"
+    [ -z "$val" ] && return 1
+    [ "$val" = "PLACEHOLDER_REPLACE_ME" ] && return 1
+    [ "$val" = "PLACEHOLDER" ] && return 1
+    return 0
+}
+
 is_email_plausible() {
     local val="$1"
     [ -z "$val" ] && return 1
@@ -810,7 +818,7 @@ cmd_info() {
         local ws_user ws_pass
         ws_user=$(get_ssm_value "webshare_username")
         ws_pass=$(get_ssm_value "webshare_password" "true")
-        if is_key_plausible "$ws_user" && is_key_plausible "$ws_pass"; then
+        if is_value_configured "$ws_user" && is_value_configured "$ws_pass"; then
             print_row "Proxy" "✅ Webshare ($ws_user)" "$GREEN"
         else
             print_row "Proxy" "❌ Webshare selected but credentials missing" "$RED"
@@ -819,7 +827,7 @@ cmd_info() {
     elif [ "$proxy_type" = "generic" ]; then
         local gen_http
         gen_http=$(get_ssm_value "generic_proxy_http_url" "true")
-        if is_key_plausible "$gen_http"; then
+        if is_value_configured "$gen_http"; then
             print_row "Proxy" "✅ Generic proxy" "$GREEN"
         else
             print_row "Proxy" "❌ Generic proxy selected but URL missing" "$RED"

@@ -33,3 +33,8 @@ Raccoglitore delle informazioni apprese durante il lavoro sul progetto.
 - Contesto: debug di `scripts/manage.ps1 apikeys` e `scripts/manage.sh apikeys` dopo segnalazione che `info` mostrava proxy non configurato.
 - Apprendimento: aggiornare solo `webshare_username/password` non basta; `info` e runtime dipendono da `proxy_type`.
 - Impatto: quando si impostano credenziali Webshare da wizard, va scritto anche `proxy_type=webshare` per evitare stato incoerente.
+
+### 2026-02-19 - Proxy credentials validation must not reuse API-key length checks
+- Contesto: segnalazione che `manage.ps1 info` mostrava "Webshare proxy selected but credentials not set" anche con credenziali presenti.
+- Apprendimento: la validazione proxy usava il controllo `api key plausible` (minimo 10 caratteri), causando falsi negativi per username/password validi ma piu corti.
+- Impatto: per proxy Webshare/generic bisogna validare solo "valore configurato/non placeholder", non la lunghezza tipica delle API key.

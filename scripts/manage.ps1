@@ -693,6 +693,13 @@ function Test-ApiKeyPlausible {
     return $true
 }
 
+function Test-ConfiguredValue {
+    param([string]$Value)
+    if (-not $Value) { return $false }
+    if ($Value -eq "PLACEHOLDER_REPLACE_ME" -or $Value -eq "PLACEHOLDER") { return $false }
+    return $true
+}
+
 function Test-EmailPlausible {
     param([string]$Value)
     if (-not $Value) { return $false }
@@ -830,7 +837,7 @@ function Invoke-Info {
     if ($proxyType -eq "webshare") {
         $wsUser = Get-SSMValue -Name "webshare_username"
         $wsPass = Get-SSMValue -Name "webshare_password" -Secure
-        if ((Test-ApiKeyPlausible $wsUser) -and (Test-ApiKeyPlausible $wsPass)) {
+        if ((Test-ConfiguredValue $wsUser) -and (Test-ConfiguredValue $wsPass)) {
             Write-Row -Label "Proxy" -Value "✅ Webshare ($wsUser)" -Color Green
         } else {
             Write-Row -Label "Proxy" -Value "❌ Webshare selected but credentials missing" -Color Red
@@ -838,7 +845,7 @@ function Invoke-Info {
         }
     } elseif ($proxyType -eq "generic") {
         $genHttp = Get-SSMValue -Name "generic_proxy_http_url" -Secure
-        if (Test-ApiKeyPlausible $genHttp) {
+        if (Test-ConfiguredValue $genHttp) {
             Write-Row -Label "Proxy" -Value "✅ Generic proxy" -Color Green
         } else {
             Write-Row -Label "Proxy" -Value "❌ Generic proxy selected but URL missing" -Color Red
