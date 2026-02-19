@@ -826,7 +826,8 @@ cmd_info() {
             issues+=("Generic proxy selected but URL not configured")
         fi
     else
-        print_row "Proxy" "None" "$WHITE"
+        print_row "Proxy" "❌ None (Required)" "$RED"
+        issues+=("Proxy is not configured — YouTube will block requests. Run: ./manage.sh apikeys")
     fi
 
     # --- DynamoDB stats ---

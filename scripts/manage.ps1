@@ -68,7 +68,7 @@ function Write-Banner {
     Write-Host "  ║                                                              ║" -ForegroundColor DarkCyan
     Write-Host "  ║   " -NoNewline -ForegroundColor DarkCyan
     Write-Host "🛠️  VidScribe Management Tool" -NoNewline -ForegroundColor Cyan
-    Write-Host "                            ║" -ForegroundColor DarkCyan
+    Write-Host "                               ║" -ForegroundColor DarkCyan
     Write-Host "  ║                                                              ║" -ForegroundColor DarkCyan
     Write-Host "  ╚══════════════════════════════════════════════════════════════╝" -ForegroundColor DarkCyan
     Write-Host ""
@@ -845,7 +845,8 @@ function Invoke-Info {
             $issues.Add("Generic proxy selected but URL not configured")
         }
     } else {
-        Write-Row -Label "Proxy" -Value "None" -Color White
+        Write-Row -Label "Proxy" -Value "❌ None (Required)" -Color Red
+        $issues.Add("Proxy is not configured — YouTube will block requests. Run: .\manage.ps1 apikeys")
     }
 
     # --- DynamoDB stats ---
@@ -1048,6 +1049,12 @@ function Invoke-Deploy {
     Push-Location $terraformDir
     
     try {
+        Write-Inf "Building Lambda layers..."
+        & "$PSScriptRoot\build_layers.ps1"
+        if ($LASTEXITCODE -ne 0) {
+            throw "Layer build failed with exit code $LASTEXITCODE"
+        }
+
         Write-Inf "Initializing Terraform..."
         terraform init
         
