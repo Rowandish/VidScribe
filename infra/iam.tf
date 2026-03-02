@@ -218,13 +218,14 @@ data "aws_iam_policy_document" "newsletter" {
     ]
   }
 
-  # DynamoDB - read summaries
+  # DynamoDB - read summaries and mark as sent
   statement {
-    sid    = "DynamoDBRead"
+    sid    = "DynamoDBReadWrite"
     effect = "Allow"
     actions = [
       "dynamodb:Query",
-      "dynamodb:GetItem"
+      "dynamodb:GetItem",
+      "dynamodb:UpdateItem"
     ]
     resources = [
       aws_dynamodb_table.videos.arn,
