@@ -637,24 +637,24 @@ function Invoke-Errors {
             --filter-expression "#s = :failed OR #s = :permfailed" `
             --expression-attribute-names '{"#s":"status"}' `
             --expression-attribute-values '{":failed":{"S":"FAILED"},":permfailed":{"S":"PERMANENTLY_FAILED"}}' `
-            --projection-expression "video_id, title, failure_reason, failed_at, retry_count, #s" `
+            --projection-expression "video_id, failure_reason, failed_at, retry_count, #s" `
             --output json 2>$null | ConvertFrom-Json
 
         $items = $scanResult.Items
         if ($items.Count -eq 0) {
             Write-OK "No failed videos found"
         } else {
-            Write-TableHeader -Columns @("Video ID", "Title", "Reason", "Retries", "Status") -Widths @(14, 30, 22, 10, 20)
+            Write-TableHeader -Columns @("Video ID", "Reason", "Retries", "Status", "Failed At") -Widths @(14, 22, 10, 20, 24)
             foreach ($item in $items) {
                 $status = if ($item.status.S) { $item.status.S } else { "FAILED" }
                 $color = if ($status -eq "PERMANENTLY_FAILED") { "Red" } else { "Yellow" }
                 Write-TableRow -Values @(
                     ($item.video_id.S ?? "?"),
-                    ($item.title.S ?? "—"),
                     ($item.failure_reason.S ?? "?"),
                     ($item.retry_count.N ?? "0"),
-                    $status
-                ) -Widths @(14, 30, 22, 10, 20) -Color $color
+                    $status,
+                    ($item.failed_at.S ?? "?")
+                ) -Widths @(14, 22, 10, 20, 24) -Color $color
             }
             Write-Host ""
             Write-Inf "Total failed: $($items.Count)"

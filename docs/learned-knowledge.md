@@ -108,3 +108,8 @@ Raccoglitore delle informazioni apprese durante il lavoro sul progetto.
 - Contesto: `manage deploy` falliva con `Backend configuration changed` dopo aggiornamenti backend, mentre il comportamento atteso era continuita dei deploy senza prompt ripetuti.
 - Apprendimento: il flusso robusto e `terraform init -input=false` come default, con retry automatico `terraform init -reconfigure` solo quando compare esplicitamente mismatch backend e usando bucket/region salvati in `.terraform/terraform.tfstate`.
 - Impatto: deploy idempotente nel caso normale e autoriparazione non interattiva nei casi di backend drift compatibile, senza forzare `-reconfigure` a ogni esecuzione.
+
+### 2026-03-08 - `manage.ps1 errors` can fail on malformed DynamoDB title payloads
+- Contesto: esecuzione `.\manage.ps1 errors` falliva con `Could not scan DynamoDB: Conversion from JSON failed ... Path 'Items[5].title'`.
+- Apprendimento: includere `title` nello scan error report puo rompere `ConvertFrom-Json` quando un record contiene testo non serializzato in modo compatibile.
+- Impatto: nel comando `errors` conviene usare solo campi operativi (`video_id`, `failure_reason`, `retry_count`, `status`, `failed_at`) per mantenere il report stabile anche con dati legacy/sporchi.
