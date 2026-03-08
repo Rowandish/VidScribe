@@ -130,6 +130,45 @@ function Confirm-Action {
     return $response -match "^[yY]"
 }
 
+# JSON parser helper for AWS CLI responses.
+# Native command output may arrive line-by-line in PowerShell pipelines; this
+# helper reassembles payloads and strips invalid control chars as a fallback.
+function ConvertFrom-JsonSafe {
+    [CmdletBinding()]
+    param(
+        [Parameter(ValueFromPipeline = $true)]
+        [AllowNull()]
+        [object]$InputObject
+    )
+
+    begin {
+        $chunks = New-Object System.Collections.Generic.List[string]
+    }
+
+    process {
+        if ($null -eq $InputObject) { return }
+        if ($InputObject -is [string]) {
+            [void]$chunks.Add($InputObject)
+        } else {
+            [void]$chunks.Add(($InputObject | Out-String).TrimEnd())
+        }
+    }
+
+    end {
+        $jsonText = ($chunks -join "`n").Trim()
+        if (-not $jsonText) {
+            throw "Empty JSON payload"
+        }
+
+        try {
+            return $jsonText | Microsoft.PowerShell.Utility\ConvertFrom-Json
+        } catch {
+            $sanitized = [regex]::Replace($jsonText, '[\x00-\x08\x0B\x0C\x0E-\x1F]', ' ')
+            return $sanitized | Microsoft.PowerShell.Utility\ConvertFrom-Json
+        }
+    }
+}
+
 # =============================================================================
 # SSM Helpers
 # =============================================================================
@@ -139,9 +178,9 @@ function Get-SSMValue {
     try {
         $paramName = "$Script:SSM_PREFIX/$Name"
         if ($Secure) {
-            $result = aws ssm get-parameter --name $paramName --with-decryption --output json 2>$null | ConvertFrom-Json
+            $result = aws ssm get-parameter --name $paramName --with-decryption --output json 2>$null | ConvertFrom-JsonSafe
         } else {
-            $result = aws ssm get-parameter --name $paramName --output json 2>$null | ConvertFrom-Json
+            $result = aws ssm get-parameter --name $paramName --output json 2>$null | ConvertFrom-JsonSafe
         }
         return $result.Parameter.Value
     } catch {
@@ -189,7 +228,7 @@ function Get-VideoProcessingStatus {
             --table-name $Script:TABLE_NAME `
             --key $keyJson `
             --consistent-read `
-            --output json 2>$null | ConvertFrom-Json
+            --output json 2>$null | ConvertFrom-JsonSafe
 
         return $item.Item.status.S
     } catch {
@@ -205,7 +244,7 @@ function Get-VideoProcessingDetails {
             --table-name $Script:TABLE_NAME `
             --key $keyJson `
             --consistent-read `
-            --output json 2>$null | ConvertFrom-Json
+            --output json 2>$null | ConvertFrom-JsonSafe
 
         if (-not $item -or -not $item.Item) { return $null }
 
@@ -322,7 +361,7 @@ function Invoke-ChannelsList {
         return
     }
 
-    $channels = $raw | ConvertFrom-Json
+    $channels = $raw | ConvertFrom-JsonSafe
     if ($channels.Count -eq 0) {
         Write-Inf "No channels configured"
         return
@@ -349,7 +388,7 @@ function Invoke-ChannelsAdd {
     Write-Section "Add Channel" "➕"
 
     $raw = Get-SSMValue -Name "youtube_channels"
-    $channels = if ($raw) { $raw | ConvertFrom-Json } else { @() }
+    $channels = if ($raw) { $raw | ConvertFrom-JsonSafe } else { @() }
 
     if ($channels -contains $Argument) {
         Write-Warn "Channel $Argument is already monitored"
@@ -374,7 +413,7 @@ function Invoke-ChannelsRemove {
     Write-Section "Remove Channel" "➖"
 
     $raw = Get-SSMValue -Name "youtube_channels"
-    $channels = if ($raw) { @($raw | ConvertFrom-Json) } else { @() }
+    $channels = if ($raw) { @($raw | ConvertFrom-JsonSafe) } else { @() }
 
     if ($channels -notcontains $Argument) {
         Write-Warn "Channel $Argument is not in the monitored list"
@@ -394,7 +433,7 @@ function Invoke-ChannelsClear {
     Write-Section "Clear All Channels" "🗑️"
 
     $raw = Get-SSMValue -Name "youtube_channels"
-    $channels = if ($raw) { @($raw | ConvertFrom-Json) } else { @() }
+    $channels = if ($raw) { @($raw | ConvertFrom-JsonSafe) } else { @() }
 
     if ($channels.Count -eq 0) {
         Write-Inf "No channels to remove"
@@ -493,7 +532,7 @@ function Invoke-NewsletterFrequency {
     if (-not $Argument -or -not $validFreqs.ContainsKey($Argument)) {
         # Show current schedule
         try {
-            $rule = aws events describe-rule --name "$Script:LAMBDA_NEWSLETTER-schedule" --output json 2>$null | ConvertFrom-Json
+            $rule = aws events describe-rule --name "$Script:LAMBDA_NEWSLETTER-schedule" --output json 2>$null | ConvertFrom-JsonSafe
             Write-Row -Label "Current schedule" -Value $rule.ScheduleExpression -Color Cyan
         } catch {
             Write-Warn "Could not read current schedule"
@@ -529,12 +568,12 @@ function Invoke-NewsletterTest {
             --cli-binary-format raw-in-base64-out `
             $tmpFile 2>$null | Out-Null
 
-        $response = Get-Content $tmpFile | ConvertFrom-Json
+        $response = Get-Content $tmpFile | ConvertFrom-JsonSafe
         Remove-Item $tmpFile -Force
 
         if ($response.statusCode -eq 200) {
             Write-OK "Test newsletter sent successfully"
-            $body = $response.body | ConvertFrom-Json
+            $body = $response.body | ConvertFrom-JsonSafe
             Write-Row -Label "Summaries" -Value $body.summaries_count -Color Cyan
             Write-Row -Label "Recipient" -Value $body.recipient -Color White
         } else {
@@ -600,12 +639,12 @@ If you receive this email, the system is operational! 🎉
             $tmpFile `
             --no-cli-pager 2>$null | Out-Null
 
-        $response = Get-Content $tmpFile -Raw | ConvertFrom-Json
+        $response = Get-Content $tmpFile -Raw | ConvertFrom-JsonSafe
         Remove-Item $tmpFile -Force
 
         if ($response.statusCode -eq 200) {
             Write-OK "Newsletter sent!"
-            $body = $response.body | ConvertFrom-Json
+            $body = $response.body | ConvertFrom-JsonSafe
             Write-Row -Label "Summaries" -Value $body.summaries_count -Color Cyan
             Write-Row -Label "Recipient" -Value $body.recipient -Color White
         } else {
@@ -638,7 +677,7 @@ function Invoke-Errors {
             --expression-attribute-names '{"#s":"status"}' `
             --expression-attribute-values '{":failed":{"S":"FAILED"},":permfailed":{"S":"PERMANENTLY_FAILED"}}' `
             --projection-expression "video_id, failure_reason, failed_at, retry_count, #s" `
-            --output json 2>$null | ConvertFrom-Json
+            --output json 2>$null | ConvertFrom-JsonSafe
 
         $items = $scanResult.Items
         if ($items.Count -eq 0) {
@@ -669,8 +708,8 @@ function Invoke-Errors {
     Write-Host "Dead Letter Queue" -ForegroundColor White
 
     try {
-        $queueUrl = (aws sqs get-queue-url --queue-name $Script:DLQ_NAME --output json 2>$null | ConvertFrom-Json).QueueUrl
-        $attrs = (aws sqs get-queue-attributes --queue-url $queueUrl --attribute-names ApproximateNumberOfMessages --output json 2>$null | ConvertFrom-Json)
+        $queueUrl = (aws sqs get-queue-url --queue-name $Script:DLQ_NAME --output json 2>$null | ConvertFrom-JsonSafe).QueueUrl
+        $attrs = (aws sqs get-queue-attributes --queue-url $queueUrl --attribute-names ApproximateNumberOfMessages --output json 2>$null | ConvertFrom-JsonSafe)
         $msgCount = [int]$attrs.Attributes.ApproximateNumberOfMessages
 
         if ($msgCount -eq 0) {
@@ -699,7 +738,7 @@ function Invoke-Errors {
                 --start-time $startTime `
                 --end-time $endTime `
                 --limit 5 `
-                --output json 2>$null | ConvertFrom-Json
+                --output json 2>$null | ConvertFrom-JsonSafe
 
             $count = $events.events.Count
             if ($count -gt 0) {
@@ -830,7 +869,7 @@ function Invoke-Info {
 
     # --- Channels ---
     $raw = Get-SSMValue -Name "youtube_channels"
-    $channels = if ($raw) { @($raw | ConvertFrom-Json) } else { @() }
+    $channels = if ($raw) { @($raw | ConvertFrom-JsonSafe) } else { @() }
     Write-Row -Label "Channels" -Value "$($channels.Count) monitored" -Color Cyan
     if ($channels.Count -eq 0) {
         Write-Warn "No YouTube channels configured"
@@ -839,7 +878,7 @@ function Invoke-Info {
 
     # --- Newsletter schedule ---
     try {
-        $rule = aws events describe-rule --name "$Script:LAMBDA_NEWSLETTER-schedule" --output json 2>$null | ConvertFrom-Json
+        $rule = aws events describe-rule --name "$Script:LAMBDA_NEWSLETTER-schedule" --output json 2>$null | ConvertFrom-JsonSafe
         $sched = $rule.ScheduleExpression
         $state = $rule.State
         $friendlySchedule = switch -Regex ($sched) {
@@ -886,7 +925,7 @@ function Invoke-Info {
         try {
             $identities = aws ses get-identity-verification-attributes `
                 --identities $senderEmail $destEmail `
-                --output json 2>$null | ConvertFrom-Json
+                --output json 2>$null | ConvertFrom-JsonSafe
 
             foreach ($email in @($senderEmail, $destEmail)) {
                 if (-not $email) { continue }
@@ -922,7 +961,7 @@ function Invoke-Info {
     # --- LLM ---
     $llmConfig = Get-SSMValue -Name "llm_config"
     if ($llmConfig) {
-        $llm = $llmConfig | ConvertFrom-Json
+        $llm = $llmConfig | ConvertFrom-JsonSafe
         Write-Row -Label "LLM provider" -Value "$($llm.provider) / $($llm.model)" -Color Cyan
         Write-Row -Label "Language" -Value ($llm.language ?? "English") -Color White
     }
@@ -982,7 +1021,7 @@ function Invoke-Info {
         $scanResult = aws dynamodb scan `
             --table-name $Script:TABLE_NAME `
             --select "COUNT" `
-            --output json 2>$null | ConvertFrom-Json
+            --output json 2>$null | ConvertFrom-JsonSafe
         Write-Row -Label "Total records" -Value $scanResult.Count -Color Cyan
 
         foreach ($status in @("QUEUED", "PROCESSED", "FAILED", "PERMANENTLY_FAILED")) {
@@ -992,7 +1031,7 @@ function Invoke-Info {
                 --expression-attribute-names '{"#s":"status"}' `
                 --expression-attribute-values "{`":status`":{`"S`":`"$status`"}}" `
                 --select "COUNT" `
-                --output json 2>$null | ConvertFrom-Json
+                --output json 2>$null | ConvertFrom-JsonSafe
             $color = switch ($status) {
                 "PROCESSED" { "Green" }
                 "QUEUED" { "Cyan" }
@@ -1008,8 +1047,8 @@ function Invoke-Info {
 
     # --- DLQ ---
     try {
-        $queueUrl = (aws sqs get-queue-url --queue-name $Script:DLQ_NAME --output json 2>$null | ConvertFrom-Json).QueueUrl
-        $attrs = (aws sqs get-queue-attributes --queue-url $queueUrl --attribute-names ApproximateNumberOfMessages --output json 2>$null | ConvertFrom-Json)
+        $queueUrl = (aws sqs get-queue-url --queue-name $Script:DLQ_NAME --output json 2>$null | ConvertFrom-JsonSafe).QueueUrl
+        $attrs = (aws sqs get-queue-attributes --queue-url $queueUrl --attribute-names ApproximateNumberOfMessages --output json 2>$null | ConvertFrom-JsonSafe)
         $dlqCount = [int]$attrs.Attributes.ApproximateNumberOfMessages
         $dlqColor = if ($dlqCount -eq 0) { "Green" } else { "Red" }
         Write-Row -Label "DLQ messages" -Value $dlqCount -Color $dlqColor
@@ -1030,7 +1069,7 @@ function Invoke-Info {
             $info = $null
             $json = aws lambda get-function --function-name $func --output json 2>$null
             if (-not $json) { throw "Not deployed" }
-            $info = $json | ConvertFrom-Json
+            $info = $json | ConvertFrom-JsonSafe
 
             $runtime = $info.Configuration.Runtime
             $memory = $info.Configuration.MemorySize
@@ -1079,11 +1118,11 @@ function Invoke-Cleanup {
                     --cli-binary-format raw-in-base64-out `
                     $tmpFile 2>$null | Out-Null
 
-                $result = Get-Content $tmpFile | ConvertFrom-Json
+                $result = Get-Content $tmpFile | ConvertFrom-JsonSafe
                 Remove-Item $tmpFile -Force
 
                 if ($result.statusCode -eq 200) {
-                    $body = $result.body | ConvertFrom-Json
+                    $body = $result.body | ConvertFrom-JsonSafe
                     Write-OK "Cleanup complete"
                     Write-Row -Label "Scanned" -Value $body.stats.scanned -Color Cyan
                     Write-Row -Label "Deleted" -Value $body.stats.deleted -Color Green
@@ -1105,7 +1144,7 @@ function Invoke-Cleanup {
                     --expression-attribute-names '{"#s":"status"}' `
                     --expression-attribute-values '{":status":{"S":"PERMANENTLY_FAILED"}}' `
                     --select "COUNT" `
-                    --output json 2>$null | ConvertFrom-Json
+                    --output json 2>$null | ConvertFrom-JsonSafe
 
                 Write-Row -Label "Permanently failed" -Value "$($scanResult.Count) record(s)" -Color $(if ($scanResult.Count -gt 0) { "Yellow" } else { "Green" })
             } catch {
@@ -1132,7 +1171,7 @@ function Invoke-Retry {
             --expression-attribute-names '{"#s":"status"}' `
             --expression-attribute-values '{":status":{"S":"FAILED"},":reason":{"S":"NO_TRANSCRIPT"}}' `
             --projection-expression "video_id, title, retry_count, next_retry_at, first_failed_at" `
-            --output json 2>$null | ConvertFrom-Json
+            --output json 2>$null | ConvertFrom-JsonSafe
 
         $items = $scanResult.Items
         if ($items.Count -eq 0) {
@@ -1195,7 +1234,7 @@ function Invoke-Deploy {
 
                 if (Test-Path $backendStatePath) {
                     try {
-                        $backendState = Get-Content $backendStatePath -Raw | ConvertFrom-Json
+                        $backendState = Get-Content $backendStatePath -Raw | ConvertFrom-JsonSafe
                         $backendBucket = $backendState.backend.config.bucket
                         $backendRegion = $backendState.backend.config.region
                     } catch {
@@ -1271,7 +1310,7 @@ function Invoke-Process {
     Write-Host "Checking AWS Resources" -ForegroundColor White
 
     try {
-        $queueUrl = (aws sqs get-queue-url --queue-name $Script:QUEUE_NAME --output json 2>$null | ConvertFrom-Json).QueueUrl
+        $queueUrl = (aws sqs get-queue-url --queue-name $Script:QUEUE_NAME --output json 2>$null | ConvertFrom-JsonSafe).QueueUrl
         if (-not $queueUrl) { throw "Queue not found" }
         Write-OK "Queue: $Script:QUEUE_NAME"
     } catch {
@@ -1325,7 +1364,7 @@ function Invoke-Process {
             $logs = aws logs filter-log-events `
                 --log-group-name $processorLogGroup `
                 --start-time $startTime `
-                --output json 2>$null | ConvertFrom-Json
+                --output json 2>$null | ConvertFrom-JsonSafe
 
             if ($logs -and $logs.events) {
                 foreach ($event in $logs.events) {
@@ -1390,12 +1429,12 @@ function Invoke-Process {
             $tmpFile `
             --no-cli-pager 2>$null | Out-Null
 
-        $response = Get-Content $tmpFile -Raw | ConvertFrom-Json
+        $response = Get-Content $tmpFile -Raw | ConvertFrom-JsonSafe
         Remove-Item $tmpFile -Force
 
         if ($response.statusCode -eq 200) {
             Write-OK "Newsletter sent!"
-            $body = $response.body | ConvertFrom-Json
+            $body = $response.body | ConvertFrom-JsonSafe
             Write-Row -Label "Summaries" -Value $body.summaries_count -Color Cyan
         } elseif ($response.errorMessage) {
             Write-Err "Newsletter error: $($response.errorMessage)"

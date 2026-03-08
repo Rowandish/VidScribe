@@ -113,3 +113,8 @@ Raccoglitore delle informazioni apprese durante il lavoro sul progetto.
 - Contesto: esecuzione `.\manage.ps1 errors` falliva con `Could not scan DynamoDB: Conversion from JSON failed ... Path 'Items[5].title'`.
 - Apprendimento: includere `title` nello scan error report puo rompere `ConvertFrom-Json` quando un record contiene testo non serializzato in modo compatibile.
 - Impatto: nel comando `errors` conviene usare solo campi operativi (`video_id`, `failure_reason`, `retry_count`, `status`, `failed_at`) per mantenere il report stabile anche con dati legacy/sporchi.
+
+### 2026-03-08 - `manage.ps1` should parse AWS CLI JSON through a single safe helper
+- Contesto: diversi comandi di management usavano `| ConvertFrom-Json` direttamente su output AWS CLI.
+- Apprendimento: centralizzare il parsing in un helper (`ConvertFrom-JsonSafe`) permette di ricomporre output multilinea e sanitizzare caratteri di controllo invalidi prima del parse.
+- Impatto: minore rischio di failure sporadici nei comandi operativi (`errors`, `info`, `cleanup`, `process`, ecc.) causati da payload JSON irregolari.
